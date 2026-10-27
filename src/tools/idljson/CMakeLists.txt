@@ -61,7 +61,7 @@ target_include_directories(
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/libidlc>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../core/ddsi/include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../core/cdr/include>"
-    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../idlc/include>")
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../idlc/idlc/include>")
 
 target_link_libraries(libidljson PRIVATE idl ddsc)
 
@@ -82,7 +82,11 @@ install(
   COMPONENT dev
   FILES_MATCHING PATTERN "*.h")
 
-include("${CycloneDDS_SOURCE_DIR}/cmake/Modules/Generate.cmake")
+if(NOT DEFINED CycloneDDS_IDLC_GENERATE_CMAKE)
+  set(CycloneDDS_IDLC_GENERATE_CMAKE
+      "${CMAKE_CURRENT_SOURCE_DIR}/../idlc/cmake/Generate.cmake")
+endif()
+include("${CycloneDDS_IDLC_GENERATE_CMAKE}")
 
 if(BUILD_TESTING)
   add_subdirectory(tests)

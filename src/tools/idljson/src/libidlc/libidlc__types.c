@@ -867,6 +867,17 @@ emit_typedef(
           "((%1$s*) dds_alloc (sizeof (%1$s)));\n\n";
     if (idl_fprintf(gen->header.handle, fmt, name) < 0)
       return IDL_RETCODE_NO_MEMORY;
+
+    const void *base_type = idl_strip(declarator, IDL_STRIP_ALIASES | IDL_STRIP_FORWARD);
+    if (base_type && idl_is_topic(base_type, (pstate->config.flags & IDL_FLAG_KEYLIST) != 0) && !idl_is_empty(base_type)) {
+      char *base_name;
+      if (IDL_PRINTA(&base_name, print_type, base_type) < 0)
+        return IDL_RETCODE_NO_MEMORY;
+      fmt = "#define %1$s_free(d,o) \\\n"
+            "%2$s_free ((d), (o))\n\n";
+      if (idl_fprintf(gen->header.handle, fmt, name, base_name) < 0)
+        return IDL_RETCODE_NO_MEMORY;
+    }
   }
 
   return IDL_VISIT_DONT_RECURSE;
@@ -884,7 +895,8 @@ emit_enum(
   char *name = NULL, *type = NULL;
   const char *fmt, *sep = "";
   const idl_enumerator_t *enumerator;
-  uint32_t skip = 0, value = 0;
+  int64_t skip = 0;
+  int32_t value = 0;
 
   (void)pstate;
   (void)revisit;
@@ -924,16 +936,14 @@ emit_enum(
     en_val->value_type = DM_TYPE_INT; // Enums are integers
     en_val->value.int64 = value;
     dm_add(&rec->members, en_val);
-    
-    /* FIXME: IDL 3.5 did not support fixed enumerator values */
     if (value == skip)
       fmt = "%s  %s";
     else
-      fmt = "%s  %s = %" PRIu32;
+      fmt = "%s  %s = %" PRId32;
     if (idl_fprintf(gen->header.handle, fmt, sep, name, value) < 0)
       return IDL_RETCODE_NO_MEMORY;
     sep = ",\n";
-    skip = value + 1;
+    skip = (int64_t) value + 1;
   }
 
   fmt = "\n} %1$s;\n\n"
