@@ -804,14 +804,17 @@ static dds_return_t deser_type_information (void * restrict dst, struct flagset 
   unsigned char *buf;
   dds_return_t ret = 0;
 
+  if (dd->bufsz == 0)
+    return DDS_RETCODE_BAD_PARAMETER;
+
   buf = ddsrt_memdup (dd->buf, dd->bufsz);
-  if (!dds_stream_normalize_xcdr2_data ((char *) buf, &srcoff, (uint32_t) dd->bufsz, dd->bswap, DDS_XTypes_TypeInformation_desc.m_ops))
+  dds_istream_t is;
+  if (dds_stream_normalize_xcdr2_data_to_istream (&is, (char *) buf, &srcoff, (uint32_t) dd->bufsz, dd->bswap, DDS_XTypes_TypeInformation_desc.m_ops) != DDS_STREAM_NORMALIZE_SUCCESS)
   {
     ret = DDS_RETCODE_BAD_PARAMETER;
     goto err_normalize;
   }
 
-  dds_istream_t is = { .m_buffer = buf, .m_index = 0, .m_size = (uint32_t) dd->bufsz, .m_xcdr_version = DDSI_RTPS_CDR_ENC_VERSION_2 };
   ddsi_typeinfo_t const ** x = deser_generic_dst (dst, &dstoff, plist_alignof (ddsi_typeinfo_t *));
   *x = ddsrt_calloc (1, DDS_XTypes_TypeInformation_desc.m_size);
   dds_stream_read (&is, (void *) *x, &dds_cdrstream_default_allocator, DDS_XTypes_TypeInformation_desc.m_ops);
@@ -1161,7 +1164,12 @@ static dds_return_t deser_generic_r (void * restrict dst, size_t * restrict dsto
         if (deser_uint32 (&x->length, dd, srcoff) < 0 || x->length > dd->bufsz - *srcoff)
           goto fail;
         const size_t elem_size = ser_generic_srcsize (desc + 1);
-        x->value = x->length ? ddsrt_malloc (x->length * elem_size) : NULL;
+        if (elem_size != 0 && x->length > UINT32_MAX / elem_size)
+          goto fail;
+        if (x->length == 0)
+          x->value = NULL;
+        else if ((x->value = ddsrt_malloc (x->length * elem_size)) == NULL)
+          goto fail;
         for (uint32_t i = 0; i < x->length; i++)
         {
           size_t elem_off = i * elem_size;
@@ -3175,7 +3183,7 @@ static dds_return_t init_one_parameter (ddsi_plist_t *plist, ddsi_ipaddress_para
     ret = entry->deser_validate_xform (dst, dd);
   if (ret < 0)
   {
-    char tmp[256], *ptmp = tmp;
+    char tmp[256] = "", *ptmp = tmp;
     size_t tmpsize = sizeof (tmp);
     (void) prtf_octetseq (&ptmp, &tmpsize, (uint32_t) dd->bufsz, dd->buf);
     GVWARNING ("invalid parameter list (vendor %u.%u, version %u.%u): pid %"PRIx16" (%s) invalid, input = %s\n",
@@ -3415,7 +3423,7 @@ dds_return_t ddsi_plist_init_frommsg (ddsi_plist_t *dest, char **nextafterplist,
 
     if (gv->logconfig.c.mask & DDS_LC_PLIST)
     {
-      char tmp[256], *ptmp = tmp;
+      char tmp[256] = "", *ptmp = tmp;
       size_t tmpsize = sizeof (tmp);
       (void) prtf_octetseq (&ptmp, &tmpsize, length, (const unsigned char *) (par + 1));
       GVLOG (DDS_LC_PLIST, "%4"PRIx32" PID %"PRIx16" len %"PRIu16" %s\n", (uint32_t) (pl - src->buf), pid, length, tmp);

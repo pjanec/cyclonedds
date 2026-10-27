@@ -47,14 +47,19 @@ typedef struct dds_dynamic_type {
 /**
  * @ingroup dynamic_type
  *
- * Invalid member ID: used when adding a member, to indicate that the member should get
- * the id (m+1) where m is the highest member id in the current set of members. A valid
- * member id has the 4 most significant bits set to 0 (because of usage in the EMHEADER),
- * so also when hashed-id are used, the hash member id will never be set to the invalid
- * member id.
+ * Invalid member ID. When adding a member, DDS_DYNAMIC_MEMBER_ID_AUTO can be used to
+ * indicate that the member should get the id (m+1) where m is the highest member id
+ * in the current set of members. A valid member id has the 4 most significant bits
+ * set to 0 (because of usage in the EMHEADER), so also when hashed-id are used, the
+ * hash member id will never be set to the invalid member id.
+ *
+ * DDS_DYNAMIC_MEMBER_ID_DISCRIMINATOR selects the discriminator in union member
+ * property setters. Passing member id 0 to those setters selects an actual union
+ * member with id 0 if present; otherwise it selects the discriminator.
  */
-#define DDS_DYNAMIC_MEMBER_ID_INVALID 0xf000000u
+#define DDS_DYNAMIC_MEMBER_ID_INVALID 0xf0000000u
 #define DDS_DYNAMIC_MEMBER_ID_AUTO DDS_DYNAMIC_MEMBER_ID_INVALID
+#define DDS_DYNAMIC_MEMBER_ID_DISCRIMINATOR (DDS_DYNAMIC_MEMBER_ID_AUTO + 1u)
 
 /**
  * @ingroup dynamic_type
@@ -156,10 +161,19 @@ typedef enum dds_dynamic_type_kind
 #define DDS_DYNAMIC_UNION_MEMBER_PRIM(member_prim_type,member_name,member_num_labels,member_labels) \
     DDS_DYNAMIC_UNION_MEMBER_ID_PRIM((member_prim_type),(member_name),DDS_DYNAMIC_MEMBER_ID_INVALID,(member_num_labels),(member_labels))
 
+#define DDS_DYNAMIC_UNION_MEMBER_DEFAULT_LABELS_ID(member_type,member_name,member_id,member_num_labels,member_labels) \
+    DDS_DYNAMIC_UNION_MEMBER_(DDS_DYNAMIC_TYPE_SPEC((member_type)),(member_name),(member_id),DDS_DYNAMIC_MEMBER_INDEX_END,(member_num_labels),(member_labels),true)
+#define DDS_DYNAMIC_UNION_MEMBER_DEFAULT_LABELS_ID_PRIM(member_prim_type,member_name,member_id,member_num_labels,member_labels) \
+    DDS_DYNAMIC_UNION_MEMBER_(DDS_DYNAMIC_TYPE_SPEC_PRIM((member_prim_type)),(member_name),(member_id),DDS_DYNAMIC_MEMBER_INDEX_END,(member_num_labels),(member_labels),true)
+#define DDS_DYNAMIC_UNION_MEMBER_DEFAULT_LABELS(member_type,member_name,member_num_labels,member_labels) \
+    DDS_DYNAMIC_UNION_MEMBER_DEFAULT_LABELS_ID((member_type),(member_name),DDS_DYNAMIC_MEMBER_ID_INVALID,(member_num_labels),(member_labels))
+#define DDS_DYNAMIC_UNION_MEMBER_DEFAULT_LABELS_PRIM(member_prim_type,member_name,member_num_labels,member_labels) \
+    DDS_DYNAMIC_UNION_MEMBER_DEFAULT_LABELS_ID_PRIM((member_prim_type),(member_name),DDS_DYNAMIC_MEMBER_ID_INVALID,(member_num_labels),(member_labels))
+
 #define DDS_DYNAMIC_UNION_MEMBER_DEFAULT_ID(member_type,member_name,member_id) \
-    DDS_DYNAMIC_UNION_MEMBER_(DDS_DYNAMIC_TYPE_SPEC((member_type)),(member_name),(member_id),DDS_DYNAMIC_MEMBER_INDEX_END,0,NULL,true)
+    DDS_DYNAMIC_UNION_MEMBER_DEFAULT_LABELS_ID((member_type),(member_name),(member_id),0,NULL)
 #define DDS_DYNAMIC_UNION_MEMBER_DEFAULT_ID_PRIM(member_prim_type,member_name,member_id) \
-    DDS_DYNAMIC_UNION_MEMBER_(DDS_DYNAMIC_TYPE_SPEC_PRIM((member_prim_type)),(member_name),(member_id),DDS_DYNAMIC_MEMBER_INDEX_END,0,NULL,true)
+    DDS_DYNAMIC_UNION_MEMBER_DEFAULT_LABELS_ID_PRIM((member_prim_type),(member_name),(member_id),0,NULL)
 #define DDS_DYNAMIC_UNION_MEMBER_DEFAULT(member_type,member_name) \
     DDS_DYNAMIC_UNION_MEMBER_DEFAULT_ID((member_type),(member_name),DDS_DYNAMIC_MEMBER_ID_INVALID)
 #define DDS_DYNAMIC_UNION_MEMBER_DEFAULT_PRIM(member_prim_type,member_name) \
@@ -222,8 +236,8 @@ typedef struct dds_dynamic_member_descriptor {
   dds_dynamic_type_spec_t type; /**< Member type, required for struct and union members. */
   char *default_value; /**< Default value for the member */
   uint32_t index; /**< Member index, applicable for struct and union members. DDS_DYNAMIC_MEMBER_INDEX_START and DDS_DYNAMIC_MEMBER_INDEX_END can be used to add a member as first or last member in the parent type. */
-  uint32_t num_labels; /**< Number of labels, required for union members in case not default_label */
-  int32_t *labels; /**< Labels for a union member, 1..n required for union members in case not default_label */
+  uint32_t num_labels; /**< Number of explicit labels for union members, required when not default_label and optional when default_label */
+  int32_t *labels; /**< Explicit labels for a union member, 1..n required when not default_label and optional when default_label */
   bool default_label; /**< Is default union member */
 } dds_dynamic_member_descriptor_t;
 
@@ -249,6 +263,17 @@ enum dds_dynamic_type_autoid {
 };
 
 /**
+ * @ingroup dynamic_type
+ *
+ * Dynamic Type try construct kind
+ */
+enum dds_dynamic_type_try_construct {
+  DDS_DYNAMIC_MEMBER_TRY_CONSTRUCT_DISCARD,
+  DDS_DYNAMIC_MEMBER_TRY_CONSTRUCT_USE_DEFAULT,
+  DDS_DYNAMIC_MEMBER_TRY_CONSTRUCT_TRIM
+};
+
+/**
  * @brief Enum value kind
  *
  * see @ref dds_dynamic_enum_literal_value
@@ -261,9 +286,9 @@ enum dds_dynamic_type_enum_value_kind {
 /**
  * @ingroup dynamic_type
  *
- * Dynamic Enumeration type literal value kind and value. Can be set to NEXT_AVAIL to indicate
- * that the current max value + 1 should be used for this member, or an explicit value can be
- * provided.
+ * Dynamic Enumeration type literal value kind and value. Explicit values are signed XTypes
+ * enum literal values. Can be set to NEXT_AVAIL to indicate that the current max value + 1
+ * should be used for this member, or an explicit value can be provided.
  */
 typedef struct dds_dynamic_enum_literal_value {
   enum dds_dynamic_type_enum_value_kind value_kind;
@@ -347,6 +372,25 @@ DDS_EXPORT dds_return_t dds_dynamic_type_set_extensibility (dds_dynamic_type_t *
  *            The provided type is not in the CONSTRUCTING state.
  */
 DDS_EXPORT dds_return_t dds_dynamic_type_set_bit_bound (dds_dynamic_type_t *type, uint16_t bit_bound);
+
+/**
+ * @brief Set the try-construct for sequence elements
+ * @ingroup dynamic_type
+ * @component dynamic_type_api
+ *
+ * @param[in,out] type Dynamic Type to set the try-construct value for. This must be a bounded sequence type.
+ * @param[in] try_construct The try-construct value to set.
+ *
+ * @return dds_return_t Return code. In case of an error, the return code field in the provided type is also set to this value.
+ *
+ * @retval DDS_RETCODE_OK
+ *            The try-construct value is set successfully on the element type.
+ * @retval DDS_RETCODE_BAD_PARAMETER
+ *            One or more of the provided parameters are invalid.
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET
+ *            The provided type is not in the CONSTRUCTING state.
+ */
+DDS_EXPORT dds_return_t dds_dynamic_type_set_try_construct (dds_dynamic_type_t *type, enum dds_dynamic_type_try_construct try_construct);
 
 /**
  * @brief Set the nested flag of a Dynamic Type
@@ -460,8 +504,10 @@ DDS_EXPORT dds_return_t dds_dynamic_type_add_bitmask_field (dds_dynamic_type_t *
  * @ingroup dynamic_type
  * @component dynamic_type_api
  *
- * @param[in,out] type Dynamic Type that contains the member to set the key flag for (must be a structure type).
- * @param[in] member_id The ID of the member to set the flag for.
+ * @param[in,out] type Dynamic Type that contains the member to set the key flag for (must be a structure type),
+ * or union type to set the key flag on the discriminator.
+ * @param[in] member_id The ID of the member to set the flag for. Use DDS_DYNAMIC_MEMBER_ID_DISCRIMINATOR
+ * for a union discriminator.
  * @param[in] is_key Indicates whether the key flag should be set or cleared.
  *
  * @return dds_return_t Return code. In case of an error, the return code field in the provided type is also set to this value.
@@ -481,7 +527,8 @@ DDS_EXPORT dds_return_t dds_dynamic_member_set_key (dds_dynamic_type_t *type, ui
  * @component dynamic_type_api
  *
  * @param[in,out] type Dynamic Type that contains the member to set the optional flag for (must be a structure type).
- * @param[in] member_id The ID of the member to set the flag for.
+ * @param[in] member_id The ID of the member to set the flag for. DDS_DYNAMIC_MEMBER_ID_AUTO selects the most
+ * recently added member.
  * @param[in] is_optional Indicates whether the optional flag should be set or cleared.
  *
  * @return dds_return_t Return code. In case of an error, the return code field in the provided type is also set to this value.
@@ -501,7 +548,8 @@ DDS_EXPORT dds_return_t dds_dynamic_member_set_optional (dds_dynamic_type_t *typ
  * @component dynamic_type_api
  *
  * @param[in,out] type Dynamic Type that contains the member to set the external flag for (must be a structure or union type).
- * @param[in] member_id The ID of the member to set the flag for.
+ * @param[in] member_id The ID of the member to set the flag for. DDS_DYNAMIC_MEMBER_ID_AUTO selects the most
+ * recently added member.
  * @param[in] is_external Indicates whether the external flag should be set or cleared.
  *
  * @return dds_return_t Return code. In case of an error, the return code field in the provided type is also set to this value.
@@ -521,7 +569,8 @@ DDS_EXPORT dds_return_t dds_dynamic_member_set_external (dds_dynamic_type_t *typ
  * @component dynamic_type_api
  *
  * @param[in,out] type Dynamic Type that contains the member to set the flag and hash-name for (must be a structure or union type).
- * @param[in] member_id The ID of the member to set the flag and hash-name for.
+ * @param[in] member_id The ID of the member to set the flag and hash-name for. DDS_DYNAMIC_MEMBER_ID_AUTO selects
+ * the most recently added member.
  * @param[in] hash_member_name The hash-name that should be used for calculating the member ID.
  *
  * @return dds_return_t Return code. In case of an error, the return code field in the provided type is also set to this value.
@@ -541,7 +590,8 @@ DDS_EXPORT dds_return_t dds_dynamic_member_set_hashid (dds_dynamic_type_t *type,
  * @component dynamic_type_api
  *
  * @param[in,out] type Dynamic Type that contains the member to set the must-understand flag for (must be a structure type).
- * @param[in] member_id The ID of the member to set the flag for.
+ * @param[in] member_id The ID of the member to set the flag for. DDS_DYNAMIC_MEMBER_ID_AUTO selects the most
+ * recently added member.
  * @param[in] is_must_understand Indicates whether the must-understand flag should be set or cleared.
  *
  * @return dds_return_t Return code. In case of an error, the return code field in the provided type is also set to this value.
@@ -555,6 +605,26 @@ DDS_EXPORT dds_return_t dds_dynamic_member_set_hashid (dds_dynamic_type_t *type,
  */
 DDS_EXPORT dds_return_t dds_dynamic_member_set_must_understand (dds_dynamic_type_t *type, uint32_t member_id, bool is_must_understand);
 
+/**
+ * @brief Set the try_construct mode for a Dynamic Type member
+ * @ingroup dynamic_type
+ * @component dynamic_type_api
+ *
+ * @param[in,out] type Dynamic Type that contains the member to set the try-construct mode for (must be a structure or union type).
+ * @param[in] member_id The ID of the member to set the try-construct mode for. Use DDS_DYNAMIC_MEMBER_ID_DISCRIMINATOR
+ * for a union discriminator.
+ * @param[in] try_construct The try-construct value to set.
+ *
+ * @return dds_return_t Return code. In case of an error, the return code field in the provided type is also set to this value.
+ *
+ * @retval DDS_RETCODE_OK
+ *            The flag is updated successfully.
+ * @retval DDS_RETCODE_BAD_PARAMETER
+ *            One or more of the provided parameters are invalid.
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET
+ *            The provided type is not in the CONSTRUCTING state.
+ */
+DDS_EXPORT dds_return_t dds_dynamic_member_set_try_construct (dds_dynamic_type_t *type, uint32_t member_id, enum dds_dynamic_type_try_construct try_construct);
 
 /**
  * @brief Registers a Dynamic Type
@@ -563,7 +633,9 @@ DDS_EXPORT dds_return_t dds_dynamic_member_set_must_understand (dds_dynamic_type
  *
  * This function registers a dynamic type, making it immutable and finalizing
  * its definition. A type that is registered, get the state 'RESOLVED' and is
- * stored in the type library.
+ * stored in the type library. A type that has already been finalized as part
+ * of registering a recursive group of types can be registered again to obtain
+ * its TypeInformation.
  *
  * @param[in] type A pointer to the dynamic type to be registered.
  * @param[out] type_info A pointer to a pointer to a ddsi_typeinfo structure that holds information about the registered type.
@@ -575,7 +647,7 @@ DDS_EXPORT dds_return_t dds_dynamic_member_set_must_understand (dds_dynamic_type
  * @retval DDS_RETCODE_BAD_PARAMETER
  *            One or more of the provided parameters are invalid.
  * @retval DDS_RETCODE_PRECONDITION_NOT_MET
- *            The provided type is not in the CONSTRUCTING state.
+ *            The provided type cannot be finalized.
  * @retval DDS_RETCODE_OUT_OF_RESOURCES
  *            Not enough resources to create the type.
  */

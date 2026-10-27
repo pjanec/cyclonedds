@@ -15,24 +15,35 @@ if(NOT TARGET CycloneDDS::ddsc)
   find_package(CycloneDDS REQUIRED)
 endif()
 
-set(headers
-  dynsub.h)
-set(sources
-  dynsub.c
-  type_cache.c
-  print_type.c
-  print_sample.c)
+set(dynsub_compat_target)
+if(TARGET compat)
+  set(dynsub_compat_target compat)
+else()
+  include(CheckIncludeFile)
+  check_include_file(getopt.h HAVE_GETOPT_H)
+  if(NOT HAVE_GETOPT_H)
+    message(FATAL_ERROR "dynsub requires getopt.h or the CycloneDDS compat target")
+  endif()
+endif()
 
-add_executable(dynsub ${sources} ${headers})
+if(TARGET dyntypelib)
+  set(dynsub_dyntypelib_target dyntypelib)
+elseif(TARGET CycloneDDS::dyntypelib)
+  set(dynsub_dyntypelib_target CycloneDDS::dyntypelib)
+else()
+  message(FATAL_ERROR "dynsub requires the dyntypelib target")
+endif()
 
-if(TARGET CycloneDDS::ddsc)
-  # shouldn't need this ...
+add_executable(dynsub dynsub.c)
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/core/ddsc/src")
   target_include_directories(dynsub
     PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../src/core/cdr/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../src/core/ddsi/include")
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../src/core/cdr/include"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../src/core/ddsc/src"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../src/core/ddsi/include")
 endif()
-target_link_libraries(dynsub CycloneDDS::ddsc)
+target_link_libraries(dynsub PRIVATE ${dynsub_dyntypelib_target} CycloneDDS::ddsc ${dynsub_compat_target})
 
 add_executable(variouspub variouspub.c)
 idlc_generate(TARGET variouspub_lib FILES "variouspub_types.idl" WARNINGS no-implicit-extensibility)

@@ -10,8 +10,8 @@
 # SPDX-License-Identifier: EPL-2.0 OR BSD-3-Clause
 #
 
-project(fuzz_handle_rtps_message LANGUAGES C)
-cmake_minimum_required(VERSION 3.5)
+project(fuzz_handle_rtps_message LANGUAGES C CXX)
+cmake_minimum_required(VERSION 3.16)
 
 if(NOT TARGET CycloneDDS::ddsc)
   # Find the CycloneDDS package.

@@ -41,6 +41,7 @@
 
 #include "XSpace.h"
 #include "XSpaceEnum.h"
+#include "XSpaceEnumUnion.h"
 #include "XSpaceMustUnderstand.h"
 #include "XSpaceTypeConsistencyEnforcement.h"
 #include "XSpaceNoTypeInfo.h"
@@ -352,7 +353,7 @@ static void sample_init_TBT (void *ptr)
 {
   TypeBuilderTypes_t45 *sample = ptr;
   sample->parent.parent.n2_1 = 1;
-  sample->parent.parent.n2_1 = 2;
+  sample->parent.parent.n2_2 = 2;
   sample->parent.n1_1 = 3;
   sample->t1 = 4;
 }
@@ -483,6 +484,11 @@ CU_Theory ((const dds_topic_descriptor_t *rd_desc, const dds_topic_descriptor_t 
 #define DDS_TD_T const dds_topic_descriptor_t *
 #define DDS_TCE_T dds_type_consistency_kind_t
 
+/* Note: for most of these cases the pattern is that t_1 is the reader type and t_N with N
+   > 1 the writer type. However, for type-widening it is inverted. The reason is that the
+   implementation of the assignability check and of this test case followed the naming in
+   the specification, but that meaning in the specification of T1 and T2 is effectively
+   reversed in the section describing type-widening. Yay. */
 CU_TheoryDataPoints (ddsc_xtypes_assignability, type_consistency_enforcement) = {
   CU_DataPoints (const char *,
                             "wr seq bound > rd seq bound, but ignore_seq_bounds",
@@ -507,8 +513,8 @@ CU_TheoryDataPoints (ddsc_xtypes_assignability, type_consistency_enforcement) = 
                                                                                                                                                                                                        "widen mutable type, prevent_type_widening",
                                                                                                                                                                                                                 "widen union type, !prevent_type_widening",
                                                                                                                                                                                                                          "widen union type, prevent_type_widening"),
-  CU_DataPoints (DDS_TD_T,  D(t1_1), D(t1_1), D(t1_1), D(t1_3), D(t1_1), D(t1_1), D(t2_1), D(t2_1), D(t2_1), D(t2_3), D(t3_1), D(t3_1), D(t4_1), D(t4_1), D(t5_1), D(t5_1), D(t5_1), D(t5_1), D(t6_1), D(t6_1), D(t7_1), D(t7_1)    ),
-  CU_DataPoints (DDS_TD_T,  D(t1_2), D(t1_2), D(t1_3), D(t1_1), D(t1_1), D(t1_3), D(t2_2), D(t2_2), D(t2_3), D(t2_1), D(t3_2), D(t3_2), D(t4_2), D(t4_2), D(t5_2), D(t5_2), D(t5_3), D(t5_4), D(t6_2), D(t6_2), D(t7_2), D(t7_2)    ),
+  CU_DataPoints (DDS_TD_T,  D(t1_1), D(t1_1), D(t1_1), D(t1_3), D(t1_1), D(t1_1), D(t2_1), D(t2_1), D(t2_1), D(t2_3), D(t3_1), D(t3_1), D(t4_1), D(t4_1), D(t5_2), D(t5_2), D(t5_3), D(t5_4), D(t6_2), D(t6_2), D(t7_2), D(t7_2)    ),
+  CU_DataPoints (DDS_TD_T,  D(t1_2), D(t1_2), D(t1_3), D(t1_1), D(t1_1), D(t1_3), D(t2_2), D(t2_2), D(t2_3), D(t2_1), D(t3_2), D(t3_2), D(t4_2), D(t4_2), D(t5_1), D(t5_1), D(t5_1), D(t5_1), D(t6_1), D(t6_1), D(t7_1), D(t7_1)    ),
 
   CU_DataPoints (DDS_TCE_T, ALLOW  , ALLOW  , ALLOW  , ALLOW  , DISALW , DISALW , ALLOW  , ALLOW  , ALLOW  , ALLOW  , ALLOW  , ALLOW  , ALLOW  , ALLOW  , ALLOW  , ALLOW  , ALLOW  , ALLOW  , ALLOW  , ALLOW  , ALLOW  , ALLOW      ),  // allow/disallow type coercion
   CU_DataPoints (bool,      DF     , DF     , DF     , DF     , DF     , DF     , DF     , DF     , DF     , DF     , DF     , DF     , DF     , DF     , false  , true   , true   , true   , false  , true   , false  , true       ),  // prevent_type_widening
@@ -539,6 +545,46 @@ CU_Theory ((const char *test, const dds_topic_descriptor_t *rd_desc, const dds_t
 #undef DF
 #undef DDS_TD_T
 #undef DDS_TCE_T
+
+#define D(n) (&XSpaceTypeConsistencyEnforcement_ ## n ## _desc)
+CU_Test (ddsc_xtypes_assignability, type_widening, .init = xtypes_assignability_init, .fini = xtypes_assignability_fini)
+{
+  static const struct {
+    const dds_topic_descriptor_t *rd_desc;
+    const dds_topic_descriptor_t *wr_desc;
+    bool assignable[2]; /* !prevent type widening, p t w */
+  } tests[] = {
+    // same struct type (not really interesting)
+    { D (t5_1), D (t5_1), { true, true } },
+    { D (t5_2), D (t5_2), { true, true } },
+    { D (t5_3), D (t5_3), { true, true } },
+    { D (t5_4), D (t5_4), { true, true } },
+    { D (t6_1), D (t6_1), { true, true } },
+    { D (t6_2), D (t6_2), { true, true } },
+    // read narrow, write wide: all ok
+    { D (t5_1), D (t5_2), { true, true } },
+    { D (t5_1), D (t5_3), { true, true } },
+    { D (t5_1), D (t5_4), { true, true } },
+    { D (t6_1), D (t6_2), { true, true } },
+    // read wide, write narrow: not all ok
+    { D (t5_2), D (t5_1), { true, false } },
+    { D (t5_3), D (t5_1), { true, false } },
+    { D (t5_4), D (t5_1), { true, true } },
+    { D (t6_2), D (t6_1), { true, false } }
+  };
+  for (size_t i = 0; i < sizeof (tests) / sizeof (tests[0]); i++)
+  {
+    for (int ptw = 0; ptw <= 1; ptw++)
+    {
+      tprintf ("Running test type_widening: rd %s wr %s ptw %d\n", tests[i].rd_desc->m_typename, tests[i].wr_desc->m_typename, ptw);
+      dds_qos_t *qos = dds_create_qos ();
+      dds_qset_type_consistency (qos, DDS_TYPE_CONSISTENCY_ALLOW_TYPE_COERCION, true, true, false, (ptw != 0), false);
+      do_test (tests[i].rd_desc, qos, tests[i].wr_desc, NULL, tests[i].assignable[ptw], 0, false, 0);
+      dds_delete_qos (qos);
+    }
+  }
+}
+#undef D
 
 /* Type consistency enforcement policy test case for force_type_validation */
 CU_Test (ddsc_xtypes_assignability, type_consistency_enforcement_force_validation, .init = xtypes_assignability_init, .fini = xtypes_assignability_fini)
@@ -602,3 +648,86 @@ CU_Theory ((const dds_topic_descriptor_t *rd_desc, const dds_topic_descriptor_t 
 #undef DM
 #undef DL
 #undef I
+
+/* Bitmask extensibility test cases */
+#define DB(n) XSpaceBitmask_ ## n ## _desc
+CU_TheoryDataPoints (ddsc_xtypes_assignability, bitmask_extensibility) = {
+  CU_DataPoints (const dds_topic_descriptor_t *, &DB(rd_f),     &DB(rd_f),          &DB(rd_f),         &DB(rd_f),        &DB(rd_f),        &DB(rd_a),     &DB(rd_a),          &DB(rd_a),         &DB(rd_a),        &DB(rd_a)        ),
+  CU_DataPoints (const dds_topic_descriptor_t *, &DB(wr_f),     &DB(wr_f_plus),     &DB(wr_f_min),     &DB(wr_a_plus),   &DB(wr_f_wide),   &DB(wr_a),     &DB(wr_a_plus),     &DB(wr_a_min),     &DB(wr_f_plus),   &DB(wr_a_wide)   ),
+  CU_DataPoints (bool,                          true,          true,              true,             true,             false,            true,          true,              true,             true,             false            )
+};
+
+CU_Theory ((const dds_topic_descriptor_t *rd_desc, const dds_topic_descriptor_t *wr_desc, bool assignable),
+    ddsc_xtypes_assignability, bitmask_extensibility, .init = xtypes_assignability_init, .fini = xtypes_assignability_fini)
+{
+  tprintf ("Running test xtypes_bitmask: %s %s\n", wr_desc->m_typename, rd_desc->m_typename);
+  do_test (rd_desc, NULL, wr_desc, NULL, assignable, 0, false, 0);
+}
+
+#undef DB
+
+/* Union discriminator enum defaulting test cases */
+static void sample_init_enum_union_extra_explicit_long (void *ptr)
+{
+  XSpaceEnumUnionWr_extra_explicit_long *sample = (XSpaceEnumUnionWr_extra_explicit_long *) ptr;
+  sample->_d = XSpaceEnumUnionWr_C;
+  sample->_u.c = 42;
+}
+
+static void sample_check_enum_union_extra_explicit_long (void *wrptr, void *rdptr)
+{
+  XSpaceEnumUnionWr_extra_explicit_long *wr_sample = (XSpaceEnumUnionWr_extra_explicit_long *) wrptr;
+  XSpaceEnumUnionRd_explicit_default_string *rd_sample = (XSpaceEnumUnionRd_explicit_default_string *) rdptr;
+  CU_ASSERT_EQ_FATAL (wr_sample->_d, XSpaceEnumUnionWr_C);
+  CU_ASSERT_EQ_FATAL (rd_sample->_d, XSpaceEnumUnionRd_A);
+  CU_ASSERT_EQ_FATAL (rd_sample->_u.a, wr_sample->_u.c);
+}
+
+static void sample_init_enum_union_extra_default_long (void *ptr)
+{
+  XSpaceEnumUnionWr_extra_default_long *sample = (XSpaceEnumUnionWr_extra_default_long *) ptr;
+  sample->_d = XSpaceEnumUnionWr_C;
+  sample->_u.x = 73;
+}
+
+static void sample_check_enum_union_extra_default_long (void *wrptr, void *rdptr)
+{
+  XSpaceEnumUnionWr_extra_default_long *wr_sample = (XSpaceEnumUnionWr_extra_default_long *) wrptr;
+  XSpaceEnumUnionRd_explicit_long *rd_sample = (XSpaceEnumUnionRd_explicit_long *) rdptr;
+  CU_ASSERT_EQ_FATAL (wr_sample->_d, XSpaceEnumUnionWr_C);
+  CU_ASSERT_EQ_FATAL (rd_sample->_d, XSpaceEnumUnionRd_A);
+  CU_ASSERT_EQ_FATAL (rd_sample->_u.a, wr_sample->_u.x);
+}
+
+static void sample_init_bitmask_uint8_default_long (void *ptr)
+{
+  XSpaceEnumUnionWr_uint8_default_long *sample = (XSpaceEnumUnionWr_uint8_default_long *) ptr;
+  sample->_d = 4;
+  sample->_u.x = 91;
+}
+
+static void sample_check_bitmask_uint8_default_long (void *wrptr, void *rdptr)
+{
+  XSpaceEnumUnionWr_uint8_default_long *wr_sample = (XSpaceEnumUnionWr_uint8_default_long *) wrptr;
+  XSpaceEnumUnionRd_bitmask_uint_default_long *rd_sample = (XSpaceEnumUnionRd_bitmask_uint_default_long *) rdptr;
+  CU_ASSERT_EQ_FATAL (wr_sample->_d, 4);
+  CU_ASSERT_EQ_FATAL (rd_sample->_d, 0);
+  CU_ASSERT_EQ_FATAL (rd_sample->_u.z, wr_sample->_u.x);
+}
+
+CU_Test (ddsc_xtypes_assignability, enum_union_discriminator_try_construct_default, .init = xtypes_assignability_init, .fini = xtypes_assignability_fini)
+{
+  do_test (&XSpaceEnumUnionRd_explicit_default_string_desc, NULL, &XSpaceEnumUnionWr_extra_explicit_long_desc, NULL, true, sample_init_enum_union_extra_explicit_long, true, sample_check_enum_union_extra_explicit_long);
+  do_test (&XSpaceEnumUnionRd_explicit_long_desc, NULL, &XSpaceEnumUnionWr_extra_default_long_desc, NULL, true, sample_init_enum_union_extra_default_long, true, sample_check_enum_union_extra_default_long);
+  do_test (&XSpaceEnumUnionRd_explicit_default_string_desc, NULL, &XSpaceEnumUnionWr_extra_explicit_string_desc, NULL, false, 0, false, 0);
+  do_test (&XSpaceEnumUnionRd_explicit_long_desc, NULL, &XSpaceEnumUnionWr_extra_default_string_desc, NULL, false, 0, false, 0);
+  do_test (&XSpaceEnumUnionRd_explicit_long_desc, NULL, &XSpaceEnumUnionWr_extra_implicit_none_desc, NULL, false, 0, false, 0);
+}
+
+CU_Test (ddsc_xtypes_assignability, bitmask_uint_union_discriminator_try_construct_default, .init = xtypes_assignability_init, .fini = xtypes_assignability_fini)
+{
+  do_test (&XSpaceEnumUnionRd_bitmask_uint_default_long_desc, NULL, &XSpaceEnumUnionWr_uint8_default_long_desc, NULL, true, sample_init_bitmask_uint8_default_long, true, sample_check_bitmask_uint8_default_long);
+  do_test (&XSpaceEnumUnionRd_bitmask_uint_default_long_desc, NULL, &XSpaceEnumUnionWr_uint8_default_string_desc, NULL, false, 0, false, 0);
+  do_test (&XSpaceEnumUnionRd_bitmask_uint_default_long_desc, NULL, &XSpaceEnumUnionWr_bitmask_implicit_none_desc, NULL, false, 0, false, 0);
+  do_test (&XSpaceEnumUnionRd_bitmask_uint_default_long_desc, NULL, &XSpaceEnumUnionWr_uint8_implicit_none_desc, NULL, false, 0, false, 0);
+}

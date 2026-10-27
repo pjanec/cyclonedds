@@ -67,7 +67,7 @@ void ddsi_log_stacktrace (const struct ddsrt_log_cfg *logcfg, const char *name, 
   }
   ddsrt_atomic_st32 (&log_stacktrace_flag, 0);
 }
-#elif defined _MSC_VER
+#elif (defined _MSC_VER && !defined UNDER_RTSS)
 #include <dbghelp.h>
 
 static ddsrt_atomic_uint32_t log_stacktrace_init = DDSRT_ATOMIC_UINT32_INIT(0);
@@ -120,6 +120,14 @@ static DWORD init_stackframe (STACKFRAME64 *frame, const CONTEXT *context)
   frame->AddrStack.Offset = context->IntSp;
   frame->AddrStack.Mode = AddrModeFlat;
   return IMAGE_FILE_MACHINE_IA64;
+#elif _M_ARM64
+  frame->AddrPC.Offset = context->Pc;
+  frame->AddrPC.Mode = AddrModeFlat;
+  frame->AddrFrame.Offset = context->Fp;
+  frame->AddrFrame.Mode = AddrModeFlat;
+  frame->AddrStack.Offset = context->Sp;
+  frame->AddrStack.Mode = AddrModeFlat;
+  return IMAGE_FILE_MACHINE_ARM64;
 #else
 #error "Unsupported machine type for windows stacktrace support"
 #endif

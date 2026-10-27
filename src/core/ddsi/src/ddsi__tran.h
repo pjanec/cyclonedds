@@ -90,7 +90,7 @@ DDSRT_STATIC_ASSERT (offsetof (ddsi_tran_write_msgfrags_t, tran_reserved) + DDSI
 enum ddsi_tran_qos_purpose {
   DDSI_TRAN_QOS_XMIT_UC, ///< will send unicast only
   DDSI_TRAN_QOS_XMIT_MC, ///< may send unicast or multicast
-  DDSI_TRAN_QOS_RECV_UC, ///< will be used for receiving unicast
+  DDSI_TRAN_QOS_RECVXMIT_UC, ///< will receive unicast and may be used for transmitting
   DDSI_TRAN_QOS_RECV_MC  ///< will be used for receiving multicast
 };
 
@@ -101,9 +101,33 @@ struct ddsi_network_packet_info {
   uint32_t if_index;      ///< Interface over which packet was received, 0 if unknown
 };
 
-/* Function pointer types */
-typedef ssize_t (*ddsi_tran_read_fn_t) (struct ddsi_tran_conn *, unsigned char *, size_t, bool, struct ddsi_network_packet_info *pktinfo);
-typedef ssize_t (*ddsi_tran_write_fn_t) (struct ddsi_tran_conn *, const ddsi_locator_t *, const ddsi_tran_write_msgfrags_t *, uint32_t);
+/** @brief Read bytes from an connection that may have SSL enabled
+ * @param[in,out] conn connection to read data from
+ * @param[out] buf buffer of at least len bytes to store received bytes
+ * @param[in] sz size of buffer pointed to by buf
+ * @param[in] allow_spurious if true, return TRY_AGAIN if no bytes available
+ * @param[in] pktinfo (optional) source & destination IP address information
+ * @param[out] bytes_read number of bytes read on successful completion, set to 0 in all other cases
+ * @return return code indicating success or failure
+ * @retval `DDS_RETCODE_OK` bytes read or EOF, `bytes_read` is 0 on EOF else in [1,len]
+ * @retval `DDS_RETCODE_TRY_AGAIN` no bytes available but not EOF either (only if `allow_spurious`)
+ * @retval `DDS_RETCODE_ERROR` unspecified error
+ * @retval other error codes possible as well (from ddsrt) */
+typedef dds_return_t (*ddsi_tran_read_fn_t) (struct ddsi_tran_conn *conn, unsigned char *buf, size_t sz, bool allow_spurious, struct ddsi_network_packet_info *pktinfo, size_t *bytes_read) ddsrt_nonnull((1, 2, 6)) ddsrt_attribute_warn_unused_result;
+
+/** @brief Write a message to a destination address
+ * @param[in,out] conn  connection to write data to
+ * @param[in] dst destination address
+ * @param[in] msgfrags message contents
+ * @param[in] flags write flags -- FIXME: do we actually have any?
+ * @param[out] bytes_written optional, number of bytes written on successful completion, undefined in all other cases
+ * @return return code indicating success or failure
+ * @retval `DDS_RETCODE_OK` bytes written or EOF, `bytes_written` not equal to len implies EOF
+ * @retval `DDS_RETCODE_TIMEOUT` not all data written because of a timeout
+ * @retval `DDS_RETCODE_ERROR` unspecified error
+ * @retval other error codes possible as well (from ddsrt) */
+typedef dds_return_t (*ddsi_tran_write_fn_t) (struct ddsi_tran_conn *conn, const ddsi_locator_t *dst, const ddsi_tran_write_msgfrags_t *msgfrags, uint32_t flags, size_t *bytes_written) ddsrt_nonnull((1, 2, 3));
+
 typedef int (*ddsi_tran_locator_fn_t) (struct ddsi_tran_factory *, struct ddsi_tran_base *, ddsi_locator_t *);
 typedef bool (*ddsi_tran_supports_fn_t) (const struct ddsi_tran_factory *, int32_t);
 typedef ddsrt_socket_t (*ddsi_tran_handle_fn_t) (struct ddsi_tran_base *);
@@ -280,7 +304,11 @@ struct ddsi_tran_qos
 {
   enum ddsi_tran_qos_purpose m_purpose;
   int m_diffserv;
-  struct ddsi_network_interface *m_interface; // only for purpose = XMIT
+  /* Associated interface; for UDP, m_bind_to_any controls whether this
+     interface supplies the bind address or only the advertised locator and
+     multicast transmit options. */
+  struct ddsi_network_interface *m_interface;
+  bool m_bind_to_any;
 };
 
 /** @component transport */
@@ -344,7 +372,18 @@ inline uint32_t ddsi_receive_buffer_size (const struct ddsi_tran_factory *factor
 /** @component transport */
 inline dds_return_t ddsi_factory_create_conn (struct ddsi_tran_conn **conn, struct ddsi_tran_factory * factory, uint32_t port, const struct ddsi_tran_qos *qos) {
   *conn = NULL;
-  if ((qos->m_interface != NULL) != (qos->m_purpose == DDSI_TRAN_QOS_XMIT_UC || qos->m_purpose == DDSI_TRAN_QOS_XMIT_MC))
+  if ((qos->m_purpose == DDSI_TRAN_QOS_XMIT_UC || qos->m_purpose == DDSI_TRAN_QOS_XMIT_MC) && qos->m_interface == NULL)
+    return DDS_RETCODE_BAD_PARAMETER;
+  if ((qos->m_purpose == DDSI_TRAN_QOS_XMIT_UC || qos->m_purpose == DDSI_TRAN_QOS_XMIT_MC) && qos->m_bind_to_any)
+    return DDS_RETCODE_BAD_PARAMETER;
+  if (qos->m_interface != NULL &&
+      qos->m_purpose != DDSI_TRAN_QOS_XMIT_UC &&
+      qos->m_purpose != DDSI_TRAN_QOS_XMIT_MC &&
+      qos->m_purpose != DDSI_TRAN_QOS_RECVXMIT_UC)
+    return DDS_RETCODE_BAD_PARAMETER;
+  if (qos->m_bind_to_any &&
+      qos->m_purpose != DDSI_TRAN_QOS_RECVXMIT_UC &&
+      qos->m_purpose != DDSI_TRAN_QOS_RECV_MC)
     return DDS_RETCODE_BAD_PARAMETER;
   if (port != DDSI_TRAN_RANDOM_PORT_NUMBER && !ddsi_is_valid_port (factory, port))
     return DDS_RETCODE_BAD_PARAMETER;
@@ -387,14 +426,39 @@ inline int ddsi_conn_locator (struct ddsi_tran_conn * conn, ddsi_locator_t * loc
   return conn->m_locator_fn (conn->m_factory, &conn->m_base, loc);
 }
 
-/** @component transport */
-inline ssize_t ddsi_conn_write (struct ddsi_tran_conn * conn, const ddsi_locator_t *dst, const ddsi_tran_write_msgfrags_t *msgfrags, uint32_t flags) {
-  return conn->m_closed ? -1 : (conn->m_write_fn) (conn, dst, msgfrags, flags);
+/** @brief Write a message to a destination address
+ * @component transport
+ * @param[in,out] conn  connection to write data to
+ * @param[in] dst destination address
+ * @param[in] msgfrags message contents
+ * @param[in] flags write flags -- FIXME: do we actually have any?
+ * @param[out] bytes_written optional, number of bytes written on successful completion, undefined in all other cases
+ * @return return code indicating success or failure
+ * @retval `DDS_RETCODE_OK` bytes written or EOF, `bytes_written` not equal to len implies EOF
+ * @retval `DDS_RETCODE_TIMEOUT` not all data written because of a timeout
+ * @retval `DDS_RETCODE_ERROR` unspecified error
+ * @retval other error codes possible as well (from ddsrt) */
+ddsrt_nonnull ((1, 2, 3))
+inline dds_return_t ddsi_conn_write (struct ddsi_tran_conn * conn, const ddsi_locator_t *dst, const ddsi_tran_write_msgfrags_t *msgfrags, uint32_t flags, size_t *bytes_written) {
+  return conn->m_closed ? DDS_RETCODE_ALREADY_DELETED : (conn->m_write_fn) (conn, dst, msgfrags, flags, bytes_written);
 }
 
-/** @component transport */
-inline ssize_t ddsi_conn_read (struct ddsi_tran_conn * conn, unsigned char * buf, size_t len, bool allow_spurious, struct ddsi_network_packet_info *pktinfo) {
-  return conn->m_closed ? -1 : conn->m_read_fn (conn, buf, len, allow_spurious, pktinfo);
+/** @brief Read bytes from an connection that may have SSL enabled
+ * @component transport
+ * @param[in,out] conn connection to read data from
+ * @param[out] buf buffer of at least len bytes to store received bytes
+ * @param[in] sz size of buffer pointed to by buf
+ * @param[in] allow_spurious if true, return TRY_AGAIN if no bytes available
+ * @param[in] pktinfo (optional) source & destination IP address information
+ * @param[out] bytes_read number of bytes read on successful completion, set to 0 in all other cases
+ * @return return code indicating success or failure
+ * @retval `DDS_RETCODE_OK` bytes read or EOF, `bytes_read` is 0 on EOF else in [1,len]
+ * @retval `DDS_RETCODE_TRY_AGAIN` no bytes available but not EOF either (only if `allow_spurious`)
+ * @retval `DDS_RETCODE_ERROR` unspecified error
+ * @retval other error codes possible as well (from ddsrt) */
+ddsrt_nonnull ((1, 2, 6)) ddsrt_attribute_warn_unused_result
+inline dds_return_t ddsi_conn_read (struct ddsi_tran_conn * conn, unsigned char * buf, size_t sz, bool allow_spurious, struct ddsi_network_packet_info *pktinfo, size_t *bytes_read) {
+  return conn->m_closed ? DDS_RETCODE_ALREADY_DELETED : conn->m_read_fn (conn, buf, sz, allow_spurious, pktinfo, bytes_read);
 }
 
 /** @component transport */

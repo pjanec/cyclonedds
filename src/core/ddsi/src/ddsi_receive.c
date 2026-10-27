@@ -168,7 +168,7 @@ static enum validation_result validate_AckNack (const struct ddsi_receiver_state
        make it well-formed and process it as normal */
     if (! DDSI_SC_STRICT_P (rst->gv->config) &&
         (ackseq == 0 && msg->readerSNState.numbits == 0) &&
-        (ddsi_vendor_is_eprosima (rst->vendor) || ddsi_vendor_is_rti (rst->vendor) || ddsi_vendor_is_rti_micro (rst->vendor)))
+        (ddsi_vendor_is_eprosima (rst->vendor) || ddsi_vendor_is_rti (rst->vendor) || ddsi_vendor_is_rti_micro (rst->vendor) || ddsi_vendor_is_twinoaks (rst->vendor)))
       msg->readerSNState.bitmap_base = ddsi_to_seqno (1);
     else
       return VR_MALFORMED;
@@ -384,11 +384,15 @@ static enum validation_result validate_Data (const struct ddsi_receiver_state *r
     return VR_MALFORMED;
   sampleinfo->fragsize = 0; /* for unfragmented data, fragsize = 0 works swell */
 
+  /* QoS and/or payload, so octetsToInlineQos must be within the
+     msg; since the serialized data and serialized parameter lists
+     have a 4 byte header, that one, too must fit */
+  if (offsetof (ddsi_rtps_data_datafrag_common_t, octetsToInlineQos) + sizeof (msg->x.octetsToInlineQos) + msg->x.octetsToInlineQos + 4 > size)
+    return VR_MALFORMED;
+
   if ((msg->x.smhdr.flags & (DDSI_DATA_FLAG_INLINE_QOS | DDSI_DATA_FLAG_DATAFLAG | DDSI_DATA_FLAG_KEYFLAG)) == 0)
   {
-    /* no QoS, no payload, so octetsToInlineQos will never be used
-       though one would expect octetsToInlineQos and size to be in
-       agreement or octetsToInlineQos to be 0 or so */
+    /* no QoS, no payload */
     *payloadp = NULL;
     *keyhashp = NULL;
     sampleinfo->size = 0; /* size is full payload size, no payload & unfragmented => size = 0 */
@@ -396,12 +400,6 @@ static enum validation_result validate_Data (const struct ddsi_receiver_state *r
     sampleinfo->complex_qos = 0;
     goto accept;
   }
-
-  /* QoS and/or payload, so octetsToInlineQos must be within the
-     msg; since the serialized data and serialized parameter lists
-     have a 4 byte header, that one, too must fit */
-  if (offsetof (ddsi_rtps_data_datafrag_common_t, octetsToInlineQos) + sizeof (msg->x.octetsToInlineQos) + msg->x.octetsToInlineQos + 4 > size)
-    return VR_MALFORMED;
 
   ptr = (unsigned char *) msg + offsetof (ddsi_rtps_data_datafrag_common_t, octetsToInlineQos) + sizeof (msg->x.octetsToInlineQos) + msg->x.octetsToInlineQos;
   if (msg->x.smhdr.flags & DDSI_DATA_FLAG_INLINE_QOS)
@@ -1293,7 +1291,7 @@ static int handle_Heartbeat (struct ddsi_receiver_state *rst, ddsrt_etime_t tnow
   ddsrt_mutex_lock (&pwr->e.lock);
   if (msg->smhdr.flags & DDSI_HEARTBEAT_FLAG_LIVELINESS &&
       pwr->c.xqos->liveliness.kind != DDS_LIVELINESS_AUTOMATIC &&
-      pwr->c.xqos->liveliness.lease_duration != DDS_INFINITY)
+      pwr->lease != NULL)
   {
     if ((lease = ddsrt_atomic_ldvoidp (&pwr->c.proxypp->minl_man)) != NULL)
       ddsi_lease_renew (lease, tnow);
@@ -1995,15 +1993,14 @@ static int handle_Gap (struct ddsi_receiver_state *rst, ddsrt_etime_t tnow, stru
   return 1;
 }
 
-static struct ddsi_serdata *get_serdata (struct ddsi_sertype const * const type, const struct ddsi_rdata *fragchain, uint32_t sz, int justkey, unsigned statusinfo, ddsrt_wctime_t tstamp)
+static dds_return_t get_serdata (struct ddsi_serdata **sd_out, struct ddsi_sertype const * const type, const struct ddsi_rdata *fragchain, uint32_t sz, int justkey, unsigned statusinfo, ddsrt_wctime_t tstamp)
 {
-  struct ddsi_serdata *sd = ddsi_serdata_from_ser (type, justkey ? SDK_KEY : SDK_DATA, fragchain, sz);
-  if (sd)
-  {
-    sd->statusinfo = statusinfo;
-    sd->timestamp = tstamp;
-  }
-  return sd;
+  dds_return_t rc;
+  if ((rc = ddsi_serdata_from_ser_err (sd_out, type, justkey ? SDK_KEY : SDK_DATA, fragchain, sz)) != DDS_RETCODE_OK)
+    return rc;
+  (*sd_out)->statusinfo = statusinfo;
+  (*sd_out)->timestamp = tstamp;
+  return rc;
 }
 
 struct remote_sourceinfo {
@@ -2028,6 +2025,7 @@ static struct ddsi_serdata *remote_make_sample (struct ddsi_tkmap_instance **tk,
   const ddsi_plist_t *qos = si->qos;
   const char *failmsg = NULL;
   struct ddsi_serdata *sample = NULL;
+  dds_return_t get_serdata_result = DDS_RETCODE_ERROR;
 
   if (si->statusinfo == 0)
   {
@@ -2046,7 +2044,7 @@ static struct ddsi_serdata *remote_make_sample (struct ddsi_tkmap_instance **tk,
                   si->data_smhdr_flags, sampleinfo->size);
       return NULL;
     }
-    sample = get_serdata (type, fragchain, sampleinfo->size, 0, statusinfo, tstamp);
+    get_serdata_result = get_serdata (&sample, type, fragchain, sampleinfo->size, 0, statusinfo, tstamp);
   }
   else if (sampleinfo->size)
   {
@@ -2055,12 +2053,12 @@ static struct ddsi_serdata *remote_make_sample (struct ddsi_tkmap_instance **tk,
        as one would expect to receive */
     if (data_smhdr_flags & DDSI_DATA_FLAG_KEYFLAG)
     {
-      sample = get_serdata (type, fragchain, sampleinfo->size, 1, statusinfo, tstamp);
+      get_serdata_result = get_serdata (&sample, type, fragchain, sampleinfo->size, 1, statusinfo, tstamp);
     }
     else
     {
       assert (data_smhdr_flags & DDSI_DATA_FLAG_DATAFLAG);
-      sample = get_serdata (type, fragchain, sampleinfo->size, 0, statusinfo, tstamp);
+      get_serdata_result = get_serdata (&sample, type, fragchain, sampleinfo->size, 0, statusinfo, tstamp);
     }
   }
   else if (data_smhdr_flags & DDSI_DATA_FLAG_INLINE_QOS)
@@ -2077,7 +2075,7 @@ static struct ddsi_serdata *remote_make_sample (struct ddsi_tkmap_instance **tk,
        * hash. This means the keyhash can't be decoded into a sample. */
       failmsg = "keyhash is protected";
     }
-    else if ((sample = ddsi_serdata_from_keyhash (type, &qos->keyhash)) == NULL)
+    else if ((get_serdata_result = ddsi_serdata_from_keyhash_err (&sample, type, &qos->keyhash)) != DDS_RETCODE_OK)
       failmsg = "keyhash is MD5 and can't be converted to key value";
     else
     {
@@ -2089,18 +2087,22 @@ static struct ddsi_serdata *remote_make_sample (struct ddsi_tkmap_instance **tk,
   {
     failmsg = "no content whatsoever";
   }
-  if (sample == NULL)
+  if (get_serdata_result != DDS_RETCODE_OK)
   {
     /* No message => error out */
     const struct ddsi_proxy_writer *pwr = sampleinfo->pwr;
     ddsi_guid_t guid;
+    sample = NULL;
     if (pwr) guid = pwr->e.guid; else memset (&guid, 0, sizeof (guid));
-    DDS_CWARNING (&gv->logconfig,
-                  "data(application, vendor %u.%u): "PGUIDFMT" #%"PRIu64": deserialization %s/%s failed (%s)\n",
-                  sampleinfo->rst->vendor.id[0], sampleinfo->rst->vendor.id[1],
-                  PGUID (guid), sampleinfo->seq,
-                  pwr && (pwr->c.xqos->present & DDSI_QP_TOPIC_NAME) ? pwr->c.xqos->topic_name : "", type->type_name,
-                  failmsg ? failmsg : "for reasons unknown");
+    if (get_serdata_result != DDS_RETCODE_NO_DATA)
+    {
+      DDS_CWARNING (&gv->logconfig,
+                    "data(application, vendor %u.%u): "PGUIDFMT" #%"PRIu64": deserialization %s/%s failed (%s)\n",
+                    sampleinfo->rst->vendor.id[0], sampleinfo->rst->vendor.id[1],
+                    PGUID (guid), sampleinfo->seq,
+                    pwr && (pwr->c.xqos->present & DDSI_QP_TOPIC_NAME) ? pwr->c.xqos->topic_name : "", type->type_name,
+                    failmsg ? failmsg : "for reasons unknown");
+    }
   }
   else
   {
@@ -2983,6 +2985,16 @@ static struct ddsi_receiver_state *rst_cow_if_needed (int *rst_live, struct ddsi
   }
 }
 
+static bool smhdr_bswap_needed (ddsi_rtps_submessage_header_t const * const smhdr)
+{
+  DDSRT_WARNING_MSVC_OFF(6326);
+  if (smhdr->flags & DDSI_RTPS_SUBMESSAGE_FLAG_ENDIANNESS)
+    return !(DDSRT_ENDIAN == DDSRT_LITTLE_ENDIAN);
+  else
+    return (DDSRT_ENDIAN == DDSRT_LITTLE_ENDIAN);
+  DDSRT_WARNING_MSVC_ON(6326);
+}
+
 static int handle_submsg_sequence
 (
   struct ddsi_thread_state * const thrst,
@@ -3045,14 +3057,7 @@ static int handle_submsg_sequence
   while (vr != VR_MALFORMED && submsg <= (end - sizeof (ddsi_rtps_submessage_header_t)))
   {
     ddsi_rtps_submessage_t * const sm = (ddsi_rtps_submessage_t *) submsg;
-    bool byteswap;
-
-    DDSRT_WARNING_MSVC_OFF(6326)
-    if (sm->smhdr.flags & DDSI_RTPS_SUBMESSAGE_FLAG_ENDIANNESS)
-      byteswap = !(DDSRT_ENDIAN == DDSRT_LITTLE_ENDIAN);
-    else
-      byteswap =  (DDSRT_ENDIAN == DDSRT_LITTLE_ENDIAN);
-    DDSRT_WARNING_MSVC_ON(6326)
+    const bool byteswap = smhdr_bswap_needed (&sm->smhdr);
     if (byteswap)
       sm->smhdr.octetsToNextHeader = ddsrt_bswap2u (sm->smhdr.octetsToNextHeader);
 
@@ -3258,8 +3263,9 @@ static int handle_submsg_sequence
   }
 }
 
-static void handle_rtps_message (struct ddsi_thread_state * const thrst, struct ddsi_domaingv *gv, struct ddsi_tran_conn * conn, const ddsi_guid_prefix_t *guidprefix, struct ddsi_rbufpool *rbpool, struct ddsi_rmsg *rmsg, size_t sz, unsigned char *msg, const struct ddsi_network_packet_info *pktinfo)
+static void handle_rtps_message (struct ddsi_thread_state * const thrst, struct ddsi_domaingv *gv, struct ddsi_tran_conn * conn, const ddsi_guid_prefix_t *guidprefix, struct ddsi_rbufpool *rbpool, struct ddsi_rmsg *rmsg, size_t sz, const struct ddsi_network_packet_info *pktinfo)
 {
+  unsigned char *msg = DDSI_RMSG_PAYLOAD (rmsg);
   ddsi_rtps_header_t *hdr = (ddsi_rtps_header_t *) msg;
   assert (gv->config.protocol_version.major == DDSI_RTPS_MAJOR);
   assert (ddsi_thread_is_asleep ());
@@ -3298,103 +3304,90 @@ static void handle_rtps_message (struct ddsi_thread_state * const thrst, struct 
   }
 }
 
-void ddsi_handle_rtps_message (struct ddsi_thread_state * const thrst, struct ddsi_domaingv *gv, struct ddsi_tran_conn * conn, const ddsi_guid_prefix_t *guidprefix, struct ddsi_rbufpool *rbpool, struct ddsi_rmsg *rmsg, size_t sz, unsigned char *msg, const struct ddsi_network_packet_info *pktinfo)
+void ddsi_handle_rtps_message (struct ddsi_thread_state * const thrst, struct ddsi_domaingv *gv, struct ddsi_tran_conn * conn, const ddsi_guid_prefix_t *guidprefix, struct ddsi_rbufpool *rbpool, struct ddsi_rmsg *rmsg, size_t sz, const struct ddsi_network_packet_info *pktinfo)
 {
-  handle_rtps_message (thrst, gv, conn, guidprefix, rbpool, rmsg, sz, msg, pktinfo);
+  handle_rtps_message (thrst, gv, conn, guidprefix, rbpool, rmsg, sz, pktinfo);
+}
+
+ddsrt_nonnull_all ddsrt_attribute_warn_unused_result
+static dds_return_t read_packet_from_stream (struct ddsi_domaingv *gv, struct ddsi_tran_conn *conn, struct ddsi_rmsg *rmsg, size_t maxsz, struct ddsi_network_packet_info *pktinfo, size_t *bytes_read)
+{
+  // Streams are sequences of RTPS messages, where the first submessage of each message
+  // must be a ADLINK_MSG_LEN with the "length" field the total RTPS message size.
+  //
+  // FIXME: We ought to keep enough state for reading messages in multiple rounds
+  //
+  // Note that we can't fix that until we stop using a ddsi_rmsg to buffer incoming data.
+
+  assert (conn->m_stream);
+
+  const size_t ddsi_msg_len_size = 8;
+  const size_t stream_hdr_size = DDSI_RTPS_MESSAGE_HEADER_SIZE + ddsi_msg_len_size;
+  unsigned char * const buff = (unsigned char *) DDSI_RMSG_PAYLOAD (rmsg);
+  size_t sz;
+  dds_return_t rc;
+
+  rc = ddsi_conn_read (conn, buff, stream_hdr_size, true, pktinfo, &sz);
+  if (rc != DDS_RETCODE_OK) // spurious reads if rc=TRY_AGAIN & sz=0
+    return rc;
+
+  // Errors or incorrect size: signal failure so connection will be dropped
+  // don't report: this is typically the path taken if the connection was dropped
+  if ((size_t) sz != stream_hdr_size)
+    return DDS_RETCODE_ERROR;
+
+  // First submessage following header should be ADLINK_MSG_LEN. The RTPS message
+  // header and this submessage's octets-to-next-header will checked by handle_rtps_message()
+  ddsi_rtps_header_t * const hdr = (ddsi_rtps_header_t *) buff;
+  ddsi_rtps_msg_len_t * const ml = (ddsi_rtps_msg_len_t *) (hdr + 1);
+  if (ml->smhdr.submessageId != DDSI_RTPS_SMID_ADLINK_MSG_LEN)
+    goto framing_error;
+
+  if (smhdr_bswap_needed (&ml->smhdr))
+    ml->length = ddsrt_bswap4u (ml->length);
+  if (ml->length < stream_hdr_size || ml->length > maxsz)
+    goto framing_error;
+
+  rc = ddsi_conn_read (conn, buff + stream_hdr_size, ml->length - stream_hdr_size, false, NULL, &sz);
+  if (rc != DDS_RETCODE_OK || sz != ml->length - stream_hdr_size)
+    return DDS_RETCODE_ERROR;
+
+  *bytes_read = ml->length;
+  return DDS_RETCODE_OK;
+
+framing_error:
+  GVTRACE ("framing error, dropping connection\n");
+  return DDS_RETCODE_ERROR;
 }
 
 static bool do_packet (struct ddsi_thread_state * const thrst, struct ddsi_domaingv *gv, struct ddsi_tran_conn * conn, const ddsi_guid_prefix_t *guidprefix, struct ddsi_rbufpool *rbpool)
 {
-  /* UDP max packet size is 64kB */
-
+  /* UDP max packet size is 64kB, we always limit RTPS messages always to 64kB */
   const size_t maxsz = gv->config.rmsg_chunk_size < 65536 ? gv->config.rmsg_chunk_size : 65536;
-  const size_t ddsi_msg_len_size = 8;
-  const size_t stream_hdr_size = DDSI_RTPS_MESSAGE_HEADER_SIZE + ddsi_msg_len_size;
-  ssize_t sz;
-  struct ddsi_rmsg * rmsg = ddsi_rmsg_new (rbpool);
-  unsigned char * buff;
-  size_t buff_len = maxsz;
-  ddsi_rtps_header_t * hdr;
   struct ddsi_network_packet_info pktinfo;
+  size_t sz;
+  dds_return_t rc;
 
+  struct ddsi_rmsg * const rmsg = ddsi_rmsg_new (rbpool);
   if (rmsg == NULL)
-  {
     return false;
-  }
 
-  DDSRT_STATIC_ASSERT (sizeof (struct ddsi_rmsg) == offsetof (struct ddsi_rmsg, chunk) + sizeof (struct ddsi_rmsg_chunk));
-  buff = (unsigned char *) DDSI_RMSG_PAYLOAD (rmsg);
-  hdr = (ddsi_rtps_header_t*) buff;
-
-  if (conn->m_stream)
-  {
-    ddsi_rtps_msg_len_t * ml = (ddsi_rtps_msg_len_t*) (hdr + 1);
-
-    /*
-      Read in packet header to get size of packet in ddsi_rtps_msg_len_t, then read in
-      remainder of packet.
-    */
-
-    /* Read in DDSI header plus MSG_LEN sub message that follows it */
-
-    sz = ddsi_conn_read (conn, buff, stream_hdr_size, true, &pktinfo);
-    if (sz == 0)
-    {
-      /* Spurious read -- which at this point is still ok */
-      ddsi_rmsg_commit (rmsg);
-      return true;
-    }
-
-    /* Read in remainder of packet */
-
-    if (sz > 0)
-    {
-      int swap;
-
-      DDSRT_WARNING_MSVC_OFF(6326)
-      if (ml->smhdr.flags & DDSI_RTPS_SUBMESSAGE_FLAG_ENDIANNESS)
-      {
-        swap = !(DDSRT_ENDIAN == DDSRT_LITTLE_ENDIAN);
-      }
-      else
-      {
-        swap =  (DDSRT_ENDIAN == DDSRT_LITTLE_ENDIAN);
-      }
-      DDSRT_WARNING_MSVC_ON(6326)
-      if (swap)
-      {
-        ml->length = ddsrt_bswap4u (ml->length);
-      }
-
-      if (ml->smhdr.submessageId != DDSI_RTPS_SMID_ADLINK_MSG_LEN)
-      {
-        malformed_packet_received (gv, buff, NULL, (size_t) sz, hdr->vendorid);
-        sz = -1;
-      }
-      else
-      {
-        sz = ddsi_conn_read (conn, buff + stream_hdr_size, ml->length - stream_hdr_size, false, NULL);
-        if (sz > 0)
-        {
-          sz = (ssize_t) ml->length;
-        }
-      }
-    }
-  }
+  if (!conn->m_stream)
+    rc = ddsi_conn_read (conn, DDSI_RMSG_PAYLOAD (rmsg), maxsz, true, &pktinfo, &sz);
   else
+    rc = read_packet_from_stream (gv, conn, rmsg, maxsz, &pktinfo, &sz);
+  if (rc == DDS_RETCODE_TRY_AGAIN)
   {
-    /* Get next packet */
-
-    sz = ddsi_conn_read (conn, buff, buff_len, true, &pktinfo);
+    rc = DDS_RETCODE_OK;
+    sz = 0;
   }
-
-  if (sz > 0 && !gv->deaf)
+  if (rc == DDS_RETCODE_OK && sz > 0 && !gv->deaf)
   {
     ddsi_rmsg_setsize (rmsg, (uint32_t) sz);
-    handle_rtps_message(thrst, gv, conn, guidprefix, rbpool, rmsg, (size_t) sz, buff, &pktinfo);
+    handle_rtps_message (thrst, gv, conn, guidprefix, rbpool, rmsg, sz, &pktinfo);
   }
   ddsi_rmsg_commit (rmsg);
-  return (sz > 0);
+  return (rc == DDS_RETCODE_OK && sz > 0);
 }
 
 struct local_participant_desc
@@ -3570,7 +3563,7 @@ void ddsi_trigger_recv_threads (const struct ddsi_domaingv *gv)
         DDSI_DECL_CONST_TRAN_WRITE_MSGFRAGS_PTR(msgfrags, ((ddsrt_iovec_t){ .iov_base = &dummy, .iov_len = 1 }));
         GVTRACE ("ddsi_trigger_recv_threads: %"PRIu32" single %s\n", i, ddsi_locator_to_string (buf, sizeof (buf), dst));
         // all sockets listen on at least the interfaces used for transmitting (at least for now)
-        ddsi_conn_write (gv->xmit_conns[0], dst, msgfrags, 0);
+        ddsi_conn_write (gv->xmit_conns_data[0], dst, msgfrags, 0, NULL);
         break;
       }
       case DDSI_RTM_MANY: {
@@ -3610,12 +3603,21 @@ uint32_t ddsi_recv_thread (void *vrecv_thread_arg)
     if (gv->m_factory->m_connless)
     {
       int rc;
-      if ((rc = recv_thread_waitset_add_conn (waitset, gv->disc_conn_uc)) < 0)
-        DDS_FATAL("recv_thread: failed to add disc_conn_uc to waitset\n");
-      num_fixed_uc += (unsigned)rc;
-      if ((rc = recv_thread_waitset_add_conn (waitset, gv->data_conn_uc)) < 0)
-        DDS_FATAL("recv_thread: failed to add data_conn_uc to waitset\n");
-      num_fixed_uc += (unsigned)rc;
+      for (int i = 0; i < gv->n_interfaces; i++)
+      {
+        if (gv->disc_conn_uc[i])
+        {
+          if ((rc = recv_thread_waitset_add_conn (waitset, gv->disc_conn_uc[i])) < 0)
+            DDS_FATAL("recv_thread: failed to add disc_conn_uc[%d] to waitset\n", i);
+          num_fixed_uc += (unsigned)rc;
+        }
+        if (gv->data_conn_uc[i])
+        {
+          if ((rc = recv_thread_waitset_add_conn (waitset, gv->data_conn_uc[i])) < 0)
+            DDS_FATAL("recv_thread: failed to add data_conn_uc[%d] to waitset\n", i);
+          num_fixed_uc += (unsigned)rc;
+        }
+      }
       num_fixed += num_fixed_uc;
       if ((rc = recv_thread_waitset_add_conn (waitset, gv->disc_conn_mc)) < 0)
         DDS_FATAL("recv_thread: failed to add disc_conn_mc to waitset\n");
@@ -3630,9 +3632,9 @@ uint32_t ddsi_recv_thread (void *vrecv_thread_arg)
       {
         // Iceoryx gets added as a pseudo-interface but there's no socket to wait
         // for input on
-        if (ddsi_conn_handle (gv->xmit_conns[i]) == DDSRT_INVALID_SOCKET)
+        if (ddsi_conn_handle (gv->xmit_conns_data[i]) == DDSRT_INVALID_SOCKET)
           continue;
-        if ((rc = recv_thread_waitset_add_conn (waitset, gv->xmit_conns[i])) < 0)
+        if ((rc = recv_thread_waitset_add_conn (waitset, gv->xmit_conns_data[i])) < 0)
           DDS_FATAL("recv_thread: failed to add transmit_conn[%d] to waitset\n", i);
         num_fixed += (unsigned)rc;
       }

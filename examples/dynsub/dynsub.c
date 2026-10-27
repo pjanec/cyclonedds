@@ -14,9 +14,15 @@
 #include <assert.h>
 #include <locale.h>
 #include <signal.h>
+#include <getopt.h>
+#if !defined _WIN32 && !DDSRT_WITH_FREERTOS && !__ZEPHYR__
+#include <unistd.h>
+#endif
 
 #include "dds/dds.h"
-#include "dynsub.h"
+#include "dds/ddsrt/heap.h"
+
+#include "dyntypelib.h"
 
 // Interpreting the data of an arbitrary topic requires interpreting the type object that describes the data.
 // The type object type is defined by the XTypes specification (https://www.omg.org/spec/DDS-XTypes/) and it
@@ -40,14 +46,56 @@
 #include "dds/ddsi/ddsi_serdata.h"
 
 // For convenience, the DDS participant is global
+static struct dyntypelib *dyntypelib;
 static dds_entity_t participant;
+static enum dtl_sample_format output_format = DTL_SAMPLE_FORMAT_JSON;
 
 static dds_entity_t termcond;
+
+static void usage (const char *argv0)
+{
+  fprintf (stderr, "usage: %s [-r] [-f json|xml] topicname\n", argv0);
+}
+
+static bool parse_sample_format (const char *arg, enum dtl_sample_format *fmt)
+{
+  if (strcmp (arg, "json") == 0)
+  {
+    *fmt = DTL_SAMPLE_FORMAT_JSON;
+    return true;
+  }
+  if (strcmp (arg, "xml") == 0)
+  {
+    *fmt = DTL_SAMPLE_FORMAT_XML;
+    return true;
+  }
+  return false;
+}
+
+static void print_sample (struct dyntypelib *dtl, bool valid_data, const void *sample, const DDS_XTypes_CompleteTypeObject *typeobj)
+{
+  struct dyntypelib_error err = { .errmsg = "" };
+  char *str = NULL;
+  const struct dtl_sample_print_options opts = {
+    .format = output_format,
+    .trailing_newline = true
+  };
+  dds_return_t rc = dtl_print_sample_to_string (dtl, valid_data, sample, typeobj, &opts, &str, NULL, &err);
+  if (rc == DDS_RETCODE_OK)
+  {
+    (void) fputs (str, stdout);
+    ddsrt_free (str);
+  }
+  else
+  {
+    printf ("(sample print failed: %s)\n", err.errmsg);
+  }
+}
 
 // Helper function to wait for a DCPSPublication/DCPSSubscription to show up with the desired topic name,
 // then calls dds_find_topic to create a topic for that data writer's/reader's type up the retrieves the
 // type object.
-static dds_return_t get_topic_and_typeobj (const char *topic_name, dds_duration_t timeout, dds_entity_t *topic, DDS_XTypes_TypeObject **xtypeobj)
+static dds_return_t get_topic_and_typeobj (const char *topic_name, dds_duration_t timeout, dds_entity_t *topic, const DDS_XTypes_TypeObject **xtypeobj)
 {
   const dds_entity_t waitset = dds_create_waitset (participant);
   const dds_entity_t dcpspublication_reader = dds_create_reader (participant, DDS_BUILTIN_TOPIC_DCPSPUBLICATION, NULL, NULL);
@@ -59,8 +107,6 @@ static dds_return_t get_topic_and_typeobj (const char *topic_name, dds_duration_
   const dds_time_t abstimeout = (timeout == DDS_INFINITY) ? DDS_NEVER : dds_time () + timeout;
   dds_return_t ret = DDS_RETCODE_OK;
   *xtypeobj = NULL;
-  struct ppc ppc;
-  ppc_init (&ppc);
   dds_attach_t triggered_reader_x;
   while (*xtypeobj == NULL && dds_waitset_wait_until (waitset, &triggered_reader_x, 1, abstimeout) > 0)
   {
@@ -107,13 +153,13 @@ static dds_return_t get_topic_and_typeobj (const char *topic_name, dds_duration_
         dds_delete_topic_descriptor (descriptor);
       }
       // The topic suffices for creating a reader, but we also need the TypeObject to make sense of the data
-      if ((*xtypeobj = load_type_with_deps (participant, typeinfo, &ppc)) == NULL)
+      if ((*xtypeobj = load_type_with_deps (dyntypelib->typecache, participant, typeinfo, &dyntypelib->ppc)) == NULL)
       {
         fprintf (stderr, "loading type with all dependencies failed\n");
         dds_return_loan (triggered_reader, &epraw, 1);
         goto error;
       }
-      if (load_type_with_deps_min (participant, typeinfo, &ppc) == NULL)
+      if (load_type_with_deps_min (dyntypelib->typecache, participant, typeinfo, &dyntypelib->ppc) == NULL)
       {
         fprintf (stderr, "loading minimal type with all dependencies failed\n");
         dds_return_loan (triggered_reader, &epraw, 1);
@@ -126,21 +172,19 @@ static dds_return_t get_topic_and_typeobj (const char *topic_name, dds_duration_
   {
     // If we got the type object, populate the type cache
     size_t align, size;
-    build_typecache_to (&(*xtypeobj)->_u.complete, &align, &size);
+    build_typecache_to (dyntypelib->typecache, &(*xtypeobj)->_u.complete, &align, &size);
     fflush (stdout);
     struct typeinfo templ = { .key = { .key = (uintptr_t) *xtypeobj } } , *info;
-    if ((info = type_cache_lookup (&templ)) != NULL)
+    if ((info = type_cache_lookup (dyntypelib->typecache, &templ)) != NULL)
     {
       assert (info->release == NULL);
-      info->release = *xtypeobj;
     }
     else
     {
       // not sure whether this is at all possible
-      info = malloc (sizeof (*info));
-      assert (info);
-      *info = (struct typeinfo){ .key = { .key = (uintptr_t) *xtypeobj }, .typeobj = &(*xtypeobj)->_u.complete, .release = *xtypeobj, .align = align, .size = size };
-      type_cache_add (info);
+      info = ddsrt_malloc (sizeof (*info));
+      *info = (struct typeinfo){ .key = { .key = (uintptr_t) *xtypeobj }, .typeobj = &(*xtypeobj)->_u.complete, .release = NULL, .align = align, .size = size };
+      type_cache_add (dyntypelib->typecache, info);
     }
   }
 error:
@@ -160,7 +204,7 @@ static bool print_sample_normal (dds_entity_t reader, const DDS_XTypes_TypeObjec
   else if (ret != 0)
   {
     // ... that we then print
-    print_sample (si.valid_data, raw, &xtypeobj->_u.complete);
+    print_sample (dyntypelib, si.valid_data, raw, &xtypeobj->_u.complete);
     if (dds_return_loan (reader, &raw, 1) < 0)
       return false;
   }
@@ -241,7 +285,7 @@ static bool print_sample_cdr (dds_entity_t reader, const DDS_XTypes_TypeObject *
       ddsi_serdata_to_ser_unref (refsd, &iov);
     }
 
-    void *raw = calloc (1, sd->type->sizeof_type);
+    void *raw = ddsrt_calloc (1, sd->type->sizeof_type);
     if (raw == NULL)
       abort ();
 
@@ -255,11 +299,11 @@ static bool print_sample_cdr (dds_entity_t reader, const DDS_XTypes_TypeObject *
       ok = ddsi_serdata_untyped_to_sample (st, sd, raw, NULL, NULL);
     }
     if (ok)
-      print_sample (si.valid_data, raw, &xtypeobj->_u.complete);
+      print_sample (dyntypelib, si.valid_data, raw, &xtypeobj->_u.complete);
     else
       printf ("(conversion to sample failed)\n");
     ddsi_sertype_free_sample (sd->type, raw, DDS_FREE_CONTENTS);
-    free (raw);
+    ddsrt_free (raw);
 
     ddsi_serdata_unref (sd);
   }
@@ -295,21 +339,33 @@ int main (int argc, char **argv)
   // for printf("%ls")
   setlocale (LC_CTYPE, "");
 
-  if (argc == 2)
+  raw_mode = false;
+  int opt;
+  while ((opt = getopt (argc, argv, "f:r")) != EOF)
   {
-    raw_mode = false;
-    topic_name = argv[1];
+    switch (opt)
+    {
+      case 'f':
+        if (!parse_sample_format (optarg, &output_format))
+        {
+          fprintf (stderr, "unsupported output format %s\n", optarg);
+          return 2;
+        }
+        break;
+      case 'r':
+        raw_mode = true;
+        break;
+      default:
+        usage (argv[0]);
+        return 2;
+    }
   }
-  else if (argc == 3 && strcmp (argv[1], "-r") == 0)
+  if (argc - optind != 1)
   {
-    raw_mode = true;
-    topic_name = argv[2];
-  }
-  else
-  {
-    fprintf (stderr, "usage: %s [-r] topicname\n", argv[0]);
+    usage (argv[0]);
     return 2;
   }
+  topic_name = argv[optind];
 
   participant = dds_create_participant (DDS_DOMAIN_DEFAULT, NULL, NULL);
   if (participant < 0)
@@ -319,8 +375,8 @@ int main (int argc, char **argv)
   }
 
   // The one magic step: get a topic and type object ...
-  DDS_XTypes_TypeObject *xtypeobj;
-  type_cache_init ();
+  dyntypelib = dtl_new (participant);
+  const DDS_XTypes_TypeObject *xtypeobj;
   if ((ret = get_topic_and_typeobj (topic_name, DDS_SECS (10), &topic, &xtypeobj)) < 0)
   {
     fprintf (stderr, "get_topic_and_typeobj: %s\n", dds_strretcode (ret));
@@ -388,7 +444,7 @@ int main (int argc, char **argv)
 #endif
 
 error:
-  type_cache_free ();
+  dtl_free (dyntypelib);
   dds_delete (participant);
   return ret < 0;
 }

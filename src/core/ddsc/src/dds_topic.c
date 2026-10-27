@@ -411,12 +411,8 @@ static bool ktopic_type_guid_equal (const void *ktp_guid_a, const void *ktp_guid
 
 static uint32_t ktopic_type_guid_hash (const void *ktp_guid)
 {
-  uint32_t hash32;
   struct ktopic_type_guid *x = (struct ktopic_type_guid *) ktp_guid;
-  DDS_XTypes_EquivalenceHash hash;
-  ddsi_typeid_get_equivalence_hash (x->type_id, &hash);
-  memcpy (&hash32, hash, sizeof (hash32));
-  return hash32;
+  return ddsi_typeid_hash (x->type_id);
 }
 
 #else
@@ -678,9 +674,7 @@ dds_entity_t dds_create_topic (dds_entity_t participant, const dds_topic_descrip
      QoS object. */
   uint32_t allowed_repr = descriptor->m_flagset & DDS_TOPIC_RESTRICT_DATA_REPRESENTATION ?
       descriptor->restrict_data_representation : DDS_DATA_REPRESENTATION_RESTRICT_DEFAULT;
-  uint16_t min_xcdrv = dds_stream_minimum_xcdr_version (descriptor->m_ops);
-  if (min_xcdrv == DDSI_RTPS_CDR_ENC_VERSION_2)
-    allowed_repr &= ~DDS_DATA_REPRESENTATION_FLAG_XCDR1;
+  allowed_repr &= dds_stream_supported_data_representations (descriptor->m_ops);
   if ((ret = dds_ensure_valid_data_representation (tpqos, allowed_repr, dds_stream_data_types (descriptor->m_ops), DDS_KIND_TOPIC)) != DDS_RETCODE_OK)
     goto err_data_repr;
 
@@ -688,7 +682,7 @@ dds_entity_t dds_create_topic (dds_entity_t participant, const dds_topic_descrip
   dds_data_representation_id_t data_representation = tpqos->data_representation.value.ids[0];
 
   struct dds_sertype_default *st = ddsrt_malloc (sizeof (*st));
-  if ((ret = dds_sertype_default_init (ppent->m_domain, st, descriptor, min_xcdrv, data_representation)) < 0)
+  if ((ret = dds_sertype_default_init (ppent->m_domain, st, descriptor, data_representation)) < 0)
   {
     ddsrt_free (st);
     goto err_st_init;
@@ -1171,9 +1165,9 @@ dds_return_t dds_delete_topic_descriptor (dds_topic_descriptor_t *descriptor)
 
 #endif /* DDS_HAS_TYPELIB */
 
-void dds_cdrstream_desc_from_topic_desc (struct dds_cdrstream_desc *desc, const dds_topic_descriptor_t *topic_desc)
+dds_return_t dds_cdrstream_desc_from_topic_desc (struct dds_cdrstream_desc *desc, const dds_topic_descriptor_t *topic_desc)
 {
   memset (desc, 0, sizeof (*desc));
-  dds_cdrstream_desc_init_with_nops (desc, &dds_cdrstream_default_allocator, topic_desc->m_size, topic_desc->m_align, topic_desc->m_flagset,
+  return dds_cdrstream_desc_init_with_nops (desc, &dds_cdrstream_default_allocator, topic_desc->m_size, topic_desc->m_align, topic_desc->m_flagset,
       topic_desc->m_ops, topic_desc->m_nops, topic_desc->m_keys, topic_desc->m_nkeys);
 }

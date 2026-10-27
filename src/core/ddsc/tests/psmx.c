@@ -822,7 +822,9 @@ static void dotest (const dds_topic_descriptor_t *tpdesc, const void *sample, bo
           const struct ddsi_sertype *st;
           rc = dds_get_entity_sertype (wr, &st);
           CU_ASSERT_EQ_FATAL (rc, 0);
-          struct ddsi_serdata * const sd = ddsi_serdata_from_sample (st, valid_data ? SDK_DATA : SDK_KEY, sample);
+          struct ddsi_serdata *sd;
+          rc = ddsi_serdata_from_sample_err (&sd, st, valid_data ? SDK_DATA : SDK_KEY, sample);
+          CU_ASSERT_EQ_FATAL (rc, 0);
           CU_ASSERT_NEQ_FATAL (sd, NULL);
           // the odious dds_writecdr overwrites statusinfo and timestamp, but dds_forwardcdr is better behaved
           switch (ops[opidx].op)
@@ -839,11 +841,18 @@ static void dotest (const dds_topic_descriptor_t *tpdesc, const void *sample, bo
             rc = dds_forwardcdr (wr, sd);
           else
           {
+#if !defined (__clang__) && defined(__GNUC__) && ((__GNUC__ * 100) + __GNUC_MINOR__) >= 1100 && ((__GNUC__ * 100) + __GNUC_MINOR__) < 1500
+            _Pragma("GCC diagnostic push")
+            _Pragma("GCC diagnostic ignored \"-Wstringop-overflow\"")
+#endif
             assert (ddsrt_atomic_ld32 (&sd->refc) >= 1 && sd->loan == NULL);
             struct ddsi_serdata * const check_sd = ddsi_serdata_ref (sd);
             rc = dds_forwardcdr (wr, check_sd);
             assert (ddsrt_atomic_ld32 (&check_sd->refc) >= 1 && check_sd->loan == NULL);
             ddsi_serdata_unref (check_sd);
+#if !defined (__clang__) && defined(__GNUC__) && ((__GNUC__ * 100) + __GNUC_MINOR__) >= 1100 && ((__GNUC__ * 100) + __GNUC_MINOR__) < 1500
+            _Pragma("GCC diagnostic pop")
+#endif
           }
         }
         CU_ASSERT_EQ_FATAL (rc, 0);
@@ -1399,7 +1408,7 @@ static void deepcopy_sample_contents (const dds_topic_descriptor_t *tpdesc, void
   if (!dds_stream_write_sample (&os, &dds_cdrstream_default_allocator, input, &desc))
     abort ();
   struct dds_istream is;
-  dds_istream_init (&is, os.m_index, os.m_buffer, os.m_xcdr_version);
+  dds_istream_init_well_formed (&is, os.m_index, os.m_buffer, os.m_xcdr_version);
   memset (output, 0, desc.size);
   dds_stream_read_sample (&is, output, &dds_cdrstream_default_allocator, &desc);
   dds_istream_fini (&is);

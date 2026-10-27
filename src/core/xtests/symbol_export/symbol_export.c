@@ -28,6 +28,7 @@
 #include "dds/ddsrt/avl.h"
 #include "dds/ddsrt/fibheap.h"
 #include "dds/ddsrt/random.h"
+#include "dds/ddsrt/regex.h"
 #include "dds/ddsrt/retcode.h"
 #include "dds/ddsrt/log.h"
 #include "dds/ddsrt/machineid.h"
@@ -227,6 +228,8 @@ int main (int argc, char **argv)
   dds_peek_mask (1, ptr, ptr, 0, 0, 0);
   dds_peek_instance (1, ptr, ptr, 0, 0, 1);
   dds_peek_instance_mask (1, ptr, ptr, 0, 0, 1, 0);
+  dds_peek_next_instance (1, ptr, ptr, 0, 0, 0);
+  dds_peek_next_instance_mask (1, ptr, ptr, 0, 0, 0, 0);
   dds_peek_next (1, ptr, ptr);
   dds_read (1, ptr, ptr, 0, 0);
   dds_read_wl (1, ptr, ptr, 0);
@@ -236,6 +239,8 @@ int main (int argc, char **argv)
   dds_read_instance_wl (1, ptr, ptr, 0, 1);
   dds_read_instance_mask (1, ptr, ptr, 0, 0, 1, 0);
   dds_read_instance_mask_wl (1, ptr, ptr, 0, 1, 0);
+  dds_read_next_instance (1, ptr, ptr, 0, 0, 0);
+  dds_read_next_instance_mask (1, ptr, ptr, 0, 0, 0, 0);
   dds_read_next (1, ptr, ptr);
   dds_read_next_wl (1, ptr, ptr);
   dds_take (1, ptr, ptr, 0, 0);
@@ -246,6 +251,8 @@ int main (int argc, char **argv)
   dds_take_instance_wl (1, ptr, ptr, 0, 1);
   dds_take_instance_mask (1, ptr, ptr, 0, 0, 1, 0);
   dds_take_instance_mask_wl (1, ptr, ptr, 0, 1, 0);
+  dds_take_next_instance (1, ptr, ptr, 0, 0, 0);
+  dds_take_next_instance_mask (1, ptr, ptr, 0, 0, 0, 0);
   dds_take_next (1, ptr, ptr);
   dds_take_next_wl (1, ptr, ptr);
   dds_peekcdr (1, ptr, 0, ptr, 0);
@@ -255,8 +262,11 @@ int main (int argc, char **argv)
   dds_takecdr (1, ptr, 0, ptr, 0);
   dds_takecdr_instance (1, ptr, 0, ptr, 1, 0);
   dds_peek_with_collector (1, 0, 1, 0, test_collect_sample, ptr);
+  dds_peek_next_instance_with_collector (1, 0, 0, 0, test_collect_sample, ptr);
   dds_read_with_collector (1, 0, 1, 0, test_collect_sample, ptr);
+  dds_read_next_instance_with_collector (1, 0, 0, 0, test_collect_sample, ptr);
   dds_take_with_collector (1, 0, 1, 0, test_collect_sample, ptr);
+  dds_take_next_instance_with_collector (1, 0, 0, 0, test_collect_sample, ptr);
   dds_lookup_instance (1, ptr);
   dds_instance_get_key (1, 1, ptr);
   dds_begin_coherent (1);
@@ -457,6 +467,7 @@ int main (int argc, char **argv)
   dds_dynamic_member_set_key (ptr, 0, 0);
   dds_dynamic_member_set_must_understand (ptr, 0, 0);
   dds_dynamic_member_set_optional (ptr, 0, 0);
+  dds_dynamic_member_set_try_construct (ptr, 0, 0);
   dds_dynamic_type_add_bitmask_field (ptr, ptr, 0);
   dds_dynamic_type_add_enum_literal (ptr, ptr, (dds_dynamic_enum_literal_value_t) { .value_kind = 0 }, 0);
   dds_dynamic_type_add_member (ptr, (dds_dynamic_member_descriptor_t) { .name = "dummy" });
@@ -468,19 +479,19 @@ int main (int argc, char **argv)
   dds_dynamic_type_set_bit_bound (ptr, 0);
   dds_dynamic_type_set_extensibility (ptr, 0);
   dds_dynamic_type_set_nested (ptr, 0);
+  dds_dynamic_type_set_try_construct (ptr, 0);
   dds_dynamic_type_unref (ptr);
 #endif
 
   // dds_rhs.h
-  dds_rhc_associate (ptr, NULL, NULL, NULL);
+  dds_rhc_associate (ptr, NULL);
   dds_rhc_store (ptr, NULL, NULL, NULL);
   dds_rhc_unregister_wr (ptr, NULL);
   dds_rhc_relinquish_ownership (ptr, 1);
-  dds_rhc_set_qos (ptr, ptr);
   dds_rhc_free (ptr);
-  dds_rhc_peek (ptr, 0, 0, 1, ptr, 0, 0);
-  dds_rhc_read (ptr, 0, 0, 1, ptr, 0, 0);
-  dds_rhc_take (ptr, 0, 0, 1, ptr, 0, 0);
+  dds_rhc_peek (ptr, 0, 0, 1, ptr, 0, 0, false);
+  dds_rhc_read (ptr, 0, 0, 1, ptr, 0, 0, false);
+  dds_rhc_take (ptr, 0, 0, 1, ptr, 0, 0, false);
   dds_rhc_add_readcondition (ptr, ptr);
   dds_rhc_remove_readcondition (ptr, ptr);
   dds_reader_data_available_cb (ptr);
@@ -492,7 +503,7 @@ int main (int argc, char **argv)
   dds_lookup_statistic (ptr, ptr);
 
   // dds_cdrstream.h
-  bool ret_cdrs;
+  dds_istream_init_well_formed (ptr, 0, ptr2, 0);
   dds_istream_init (ptr, 0, ptr2, 0);
   dds_istream_fini (ptr);
   dds_ostream_init (ptr, ptr2, 0, 0);
@@ -502,10 +513,12 @@ int main (int argc, char **argv)
   dds_ostreamBE_init (ptr, ptr2, 0, 0);
   dds_ostreamBE_fini (ptr, ptr2);
 
-  ret_cdrs = dds_stream_normalize (ptr, 0, 0, 0, ptr2, 0, ptr3);
-  (void) ret_cdrs;
-  ret_cdrs = dds_stream_normalize_xcdr2_data (ptr, ptr2, 0, 0, ptr3);
-  (void) ret_cdrs;
+  (void) dds_stream_normalize (ptr, 0, 0, 0, ptr2, 0, ptr3);
+  (void) dds_stream_normalize_with_flags (ptr, 0, 0, 0, ptr2, 0, 0, ptr3);
+  (void) dds_stream_normalize_xcdr2_data (ptr, ptr2, 0, 0, ptr3);
+  (void) dds_stream_normalize_to_istream (ptr, ptr2, 0, 0, 0, ptr3, 0, ptr4);
+  (void) dds_stream_normalize_to_istream_with_flags (ptr, ptr2, 0, 0, 0, ptr3, 0, 0, ptr4);
+  (void) dds_stream_normalize_xcdr2_data_to_istream (ptr, ptr2, ptr3, 0, 0, ptr4);
 
   dds_stream_write (ptr, ptr2, ptr3, ptr4);
   dds_stream_writeLE (ptr, ptr2, ptr3, ptr4);
@@ -695,6 +708,10 @@ int main (int argc, char **argv)
   ddsi_serdata_ref (ptr);
   ddsi_serdata_unref (ptr);
   ddsi_serdata_size (ptr);
+  ddsi_serdata_from_ser_err (ptr, ptr, 0, ptr, 0);
+  ddsi_serdata_from_ser_iov_err (ptr, ptr, 0, 0, ptr, 0);
+  ddsi_serdata_from_keyhash_err (ptr, ptr, ptr);
+  ddsi_serdata_from_sample_err (ptr, ptr, 0, ptr);
   ddsi_serdata_from_ser (ptr, 0, ptr, 0);
   ddsi_serdata_from_ser_iov (ptr, 0, 0, ptr, 0);
   ddsi_serdata_from_keyhash (ptr, ptr);
@@ -710,12 +727,15 @@ int main (int argc, char **argv)
   ddsi_serdata_print (ptr, buf, 0);
   ddsi_serdata_print_untyped (ptr, ptr, buf, 0);
   ddsi_serdata_get_keyhash (ptr, ptr, 0);
+  ddsi_serdata_from_loaned_sample_err (ptr, ptr, 0, ptr2, ptr3, 0);
+  ddsi_serdata_from_psmx_err (ptr, ptr, ptr2);
   ddsi_serdata_from_loaned_sample (ptr, 0, ptr2, ptr3, 0);
   ddsi_serdata_from_psmx (ptr, ptr2);
 
 #ifdef DDS_HAS_TYPELIB
   // ddsi_typewrap.h
   ddsi_typeid_compare (ptr, ptr);
+  ddsi_typeid_hash (ptr);
   ddsi_typeid_copy (ptr, ptr);
   ddsi_typeid_dup (ptr);
   ddsi_typeid_ser (ptr, ptr, ptr);
@@ -816,7 +836,7 @@ int main (int argc, char **argv)
   (void) ddsi_ref_addrset (ptr);
   ddsi_unref_addrset (ptr);
   (void) ddsi_new_addrset ();
-  ddsi_add_locator_to_addrset (ptr, ptr2, ptr3);
+  ddsi_add_locator_to_addrset (ptr, ptr2, ptr3, ptr4);
 
   // ddsi/ddsi_tran.h
   (void) ddsi_locator_to_string (ptr, 0, ptr2);
@@ -1023,9 +1043,18 @@ int main (int argc, char **argv)
   ddsrt_bswap4 (0);
   ddsrt_bswap8u (0);
   ddsrt_bswap8 (0);
+  ddsrt_bswap16u ((ddsrt_uint128_t){0,0});
+  ddsrt_bswap16 ((ddsrt_int128_t){0,0});
 
   // ddsrt/random.h
   ddsrt_random ();
+
+  // ddsrt/regex.h
+  ddsrt_regex_compile (ptr, ptr);
+  ddsrt_regex_compile_with_storage (ptr, ptr, ptr, 0);
+  ddsrt_regex_match (ptr, ptr);
+  ddsrt_regex_search (ptr, ptr);
+  ddsrt_regex_fini (ptr);
 
   // ddsrt/avl.h
   ddsrt_avl_treedef_init (ptr, 0, 0, ptr, ptr, 0);
@@ -1144,6 +1173,10 @@ int main (int argc, char **argv)
   dds_log (0, ptr, 0, ptr, " ");
   dds_set_log_mask (0); // ROS 2 rmw_cyclonedds_cpp needs this, probably erroneously
   dds_get_log_mask ();
+  dds_set_log_sink (ptr, ptr);
+  dds_set_trace_sink (ptr, ptr);
+  ddsrt_log_file_open (ptr, true, ptr);
+  ddsrt_log_file_close (ptr);
 
   // ddsrt/sockets.h
 #if DDSRT_HAVE_GETHOSTNAME
@@ -1175,12 +1208,10 @@ int main (int argc, char **argv)
 
   // ddsrt/strtol.h
   ddsrt_todigit (0);
-  ddsrt_strtoll (ptr, ptr, 0, ptr);
-  ddsrt_strtoull (ptr, ptr, 0, ptr);
-  ddsrt_atoll (ptr, ptr);
-  ddsrt_atoull (ptr, ptr);
-  ddsrt_lltostr (0, ptr, 0, ptr);
-  ddsrt_ulltostr (0, ptr, 0, ptr);
+  ddsrt_strtoint64 (ptr, ptr, 0, ptr);
+  ddsrt_strtouint64 (ptr, ptr, 0, ptr);
+  ddsrt_int64tostr (0, ptr, 0, ptr);
+  ddsrt_uint64tostr (0, ptr, 0, ptr);
 
   // ddsrt/xmlparser.h
   ddsrt_xmlp_new_file (ptr, ptr, ptr);
@@ -1200,6 +1231,7 @@ int main (int argc, char **argv)
   ddsrt_readdir (ptr, ptr);
   ddsrt_stat (ptr, ptr);
   ddsrt_file_normalize (ptr);
+  ddsrt_file_abspath (ptr, ptr);
   ddsrt_file_sep ();
 #endif
 
@@ -1228,6 +1260,7 @@ int main (int argc, char **argv)
   dds_entity_lock (0, 0, ptr);
   dds_entity_unlock (ptr);
 
+#ifdef DDS_HAS_QOS_PROVIDER
   // dds__sysdef_parser.h
   dds_sysdef_init_sysdef (ptr, ptr2, 0);
   dds_sysdef_init_sysdef_str (ptr, ptr2, 0);
@@ -1235,6 +1268,14 @@ int main (int argc, char **argv)
   dds_sysdef_init_data_types (ptr, ptr2);
   dds_sysdef_init_data_types_str (ptr, ptr2);
   dds_sysdef_fini_data_types (ptr);
+#endif
+
+  // deprecated functions from v0.1
+  dds_fail_set (0);
+  dds_fail_get ();
+  dds_err_str (0);
+  dds_fail (ptr, ptr2);
+  dds_err_check (0, 0, ptr);
 
   return 0;
 }

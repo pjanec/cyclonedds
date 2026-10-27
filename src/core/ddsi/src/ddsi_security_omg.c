@@ -106,18 +106,6 @@
     (info.security_attributes & DDSI_PARTICIPANT_SECURITY_ATTRIBUTES_FLAG_IS_RTPS_PROTECTED)    \
 )
 
-#define SECURITY_INFO_IS_WRITE_PROTECTED(info)                                              \
-(                                                                                           \
-    (info.security_attributes & DDSI_ENDPOINT_SECURITY_ATTRIBUTES_FLAG_IS_VALID          ) && \
-    (info.security_attributes & DDSI_ENDPOINT_SECURITY_ATTRIBUTES_FLAG_IS_WRITE_PROTECTED)    \
-)
-
-#define SECURITY_INFO_IS_READ_PROTECTED(info)                                               \
-(                                                                                           \
-    (info.security_attributes & DDSI_ENDPOINT_SECURITY_ATTRIBUTES_FLAG_IS_VALID          ) && \
-    (info.security_attributes & DDSI_ENDPOINT_SECURITY_ATTRIBUTES_FLAG_IS_READ_PROTECTED )    \
-)
-
 #define SECURITY_INFO_IS_RTPS_PROTECTED(info)                                                 \
 (                                                                                             \
     (info.security_attributes & DDSI_PARTICIPANT_SECURITY_ATTRIBUTES_FLAG_IS_VALID         ) && \
@@ -371,7 +359,7 @@ static void unregister_and_free_pending_match(const struct ddsi_domaingv * gv, d
   if (match->crypto_handle != 0)
   {
     DDS_Security_SecurityException exception = DDS_SECURITY_EXCEPTION_INIT;
-    const char *ename;
+    const char *ename = "unknown";
     bool r = true;
 
     assert(sc);
@@ -498,6 +486,7 @@ static struct ddsi_pp_proxypp_match * ddsi_pp_proxypp_match_new(struct ddsi_prox
   pm = ddsrt_malloc(sizeof(*pm));
   pm->proxypp_guid = proxypp->e.guid;
   pm->proxypp_crypto_handle = proxypp_crypto_handle;
+  pm->authenticated = false;
 
   return pm;
 }
@@ -882,10 +871,9 @@ static bool pp_expired_by_perm (const struct ddsi_participant * pp, DDS_Security
 static bool proxypp_expired_by_perm (const struct ddsi_proxy_participant * proxypp, DDS_Security_Handle handle)
 {
   bool result = false;
-  uint32_t i = 0;
   ddsrt_avl_iter_t it;
   ddsrt_mutex_lock (&proxypp->sec_attr->lock);
-  for (struct ddsi_proxypp_pp_match *ppm = ddsrt_avl_iter_first (&proxypp_pp_treedef, &proxypp->sec_attr->participants, &it); ppm; ppm = ddsrt_avl_iter_next (&it), i++)
+  for (struct ddsi_proxypp_pp_match *ppm = ddsrt_avl_iter_first (&proxypp_pp_treedef, &proxypp->sec_attr->participants, &it); ppm; ppm = ddsrt_avl_iter_next (&it))
   {
     if (ppm->permissions_handle == handle)
     {
@@ -1891,6 +1879,19 @@ static bool proxypp_is_authenticated(const struct ddsi_proxy_participant *proxyp
   return authenticated;
 }
 
+static bool proxypp_is_authenticated_with (const struct ddsi_proxy_participant *proxypp, const struct ddsi_participant *pp)
+{
+  assert (pp->sec_attr != NULL);
+
+  /* Use the local association: the remote security attributes can disappear
+   * when a failed handshake downgrades the proxy participant to nonsecure. */
+  ddsrt_mutex_lock (&pp->sec_attr->lock);
+  const struct ddsi_pp_proxypp_match *pm = ddsrt_avl_clookup (&pp_proxypp_treedef, &pp->sec_attr->proxy_participants, &proxypp->e.guid);
+  const bool authenticated = pm != NULL && pm->authenticated;
+  ddsrt_mutex_unlock (&pp->sec_attr->lock);
+  return authenticated;
+}
+
 static void match_proxypp_pp(struct ddsi_participant *pp, struct ddsi_proxy_participant *proxypp, DDS_Security_PermissionsHandle permissions_handle, DDS_Security_SharedSecretHandle shared_secret_handle)
 {
   struct ddsi_proxypp_pp_match *pm;
@@ -1973,11 +1974,23 @@ void ddsi_omg_security_set_remote_participant_authenticated (struct ddsi_partici
 {
   struct ddsi_proxypp_pp_match *pm;
 
+  /* Association creation, downgrade and this function run on the domain's
+   * single handshake FSM worker. The worker remains awake throughout this
+   * call, preventing deferred participant destruction from removing the
+   * associations. These guarantees prevent removal and recreation between
+   * the two lock acquisitions; the separate locks alone do not prevent it. */
   ddsrt_mutex_lock(&proxypp->sec_attr->lock);
   pm = ddsrt_avl_lookup(&proxypp_pp_treedef, &proxypp->sec_attr->participants, &pp->sec_attr->crypto_handle);
   if (pm)
     pm->authenticated = true;
+  const bool authenticated = pm != NULL;
   ddsrt_mutex_unlock(&proxypp->sec_attr->lock);
+
+  ddsrt_mutex_lock (&pp->sec_attr->lock);
+  struct ddsi_pp_proxypp_match *pc = ddsrt_avl_clookup (&pp_proxypp_treedef, &pp->sec_attr->proxy_participants, &proxypp->e.guid);
+  if (pc)
+    pc->authenticated = authenticated;
+  ddsrt_mutex_unlock (&pp->sec_attr->lock);
 }
 
 static bool is_volatile_secure_endpoint(ddsi_entityid_t entityid)
@@ -2184,20 +2197,22 @@ bool ddsi_omg_writer_is_payload_protected (const struct ddsi_writer *wr)
   return wr->sec_attr != NULL && wr->sec_attr->attr.is_payload_protected;
 }
 
-bool ddsi_omg_security_check_remote_writer_permissions (const struct ddsi_proxy_writer *pwr, uint32_t domain_id, struct ddsi_participant *pp)
+bool ddsi_omg_security_check_remote_writer_permissions (const struct ddsi_proxy_writer *pwr, const struct ddsi_reader *rd)
 {
+  struct ddsi_participant *pp = rd->c.pp;
   struct ddsi_domaingv *gv = pp->e.gv;
   struct dds_security_context *sc = ddsi_omg_security_get_secure_context (pp);
   DDS_Security_SecurityException exception = DDS_SECURITY_EXCEPTION_INIT;
   DDS_Security_PublicationBuiltinTopicDataSecure publication_data;
   DDS_Security_TopicBuiltinTopicData topic_data;
 
-  if (!sc)
+  if (!sc || !rd->sec_attr)
     return true;
 
   if (!ddsi_omg_proxy_participant_is_secure (pwr->c.proxypp))
   {
-    if (ddsi_omg_participant_allow_unauthenticated(pp))
+    if (ddsi_omg_participant_allow_unauthenticated(pp) &&
+        !rd->sec_attr->attr.is_read_protected && !rd->sec_attr->attr.is_write_protected)
     {
       GVTRACE(" allow non-secure remote writer "PGUIDFMT, PGUID(pwr->e.guid));
       return true;
@@ -2209,7 +2224,18 @@ bool ddsi_omg_security_check_remote_writer_permissions (const struct ddsi_proxy_
     }
   }
 
-  if (!SECURITY_INFO_IS_WRITE_PROTECTED(pwr->c.security_info))
+  /* Discovery can precede authentication, but user endpoints must wait for
+   * admission by their own local participant, even on unprotected topics. */
+  if (!ddsi_is_builtin_entityid (rd->e.guid.entityid, DDSI_VENDORID_ECLIPSE) &&
+      !proxypp_is_authenticated_with (pwr->c.proxypp, pp))
+  {
+    GVTRACE ("Remote writer "PGUIDFMT" is not authenticated with participant "PGUIDFMT" yet\n", PGUID (pwr->e.guid), PGUID (pp->e.guid));
+    return false;
+  }
+
+  /* The local policy determines whether to check permissions, even when the
+   * remote endpoint omits its security attributes or declares itself unprotected. */
+  if (!rd->sec_attr->attr.is_write_protected)
     return true;
 
   DDS_Security_PermissionsHandle permissions_handle;
@@ -2220,7 +2246,7 @@ bool ddsi_omg_security_check_remote_writer_permissions (const struct ddsi_proxy_
   }
 
   ddsi_omg_shallow_copy_PublicationBuiltinTopicDataSecure (&publication_data, &pwr->e.guid, pwr->c.xqos, &pwr->c.security_info);
-  bool result = sc->access_control_context->check_remote_datawriter(sc->access_control_context, permissions_handle, (int)domain_id, &publication_data, &exception);
+  bool result = sc->access_control_context->check_remote_datawriter(sc->access_control_context, permissions_handle, (int)gv->config.domainId, &publication_data, &exception);
   if (!result)
   {
     handle_not_allowed(gv, pp->sec_attr->permissions_handle, sc->access_control_context, &exception, publication_data.topic_name,
@@ -2229,7 +2255,7 @@ bool ddsi_omg_security_check_remote_writer_permissions (const struct ddsi_proxy_
   else
   {
     ddsi_omg_shallow_copy_TopicBuiltinTopicData (&topic_data, publication_data.topic_name, publication_data.type_name);
-    result = sc->access_control_context->check_remote_topic(sc->access_control_context, permissions_handle, (int)domain_id, &topic_data, &exception);
+    result = sc->access_control_context->check_remote_topic(sc->access_control_context, permissions_handle, (int)gv->config.domainId, &topic_data, &exception);
     ddsi_omg_shallow_free_TopicBuiltinTopicData (&topic_data);
     if (!result)
       handle_not_allowed(gv, pp->sec_attr->permissions_handle, sc->access_control_context, &exception, publication_data.topic_name,
@@ -2422,8 +2448,9 @@ void ddsi_omg_security_deregister_remote_writer (const struct ddsi_proxy_writer 
   }
 }
 
-bool ddsi_omg_security_check_remote_reader_permissions (const struct ddsi_proxy_reader *prd, uint32_t domain_id, struct ddsi_participant *pp, bool *relay_only)
+bool ddsi_omg_security_check_remote_reader_permissions (const struct ddsi_proxy_reader *prd, const struct ddsi_writer *wr, bool *relay_only)
 {
+  struct ddsi_participant *pp = wr->c.pp;
   struct ddsi_domaingv *gv = pp->e.gv;
   struct dds_security_context *sc = ddsi_omg_security_get_secure_context (pp);
   DDS_Security_SecurityException exception = DDS_SECURITY_EXCEPTION_INIT;
@@ -2434,12 +2461,13 @@ bool ddsi_omg_security_check_remote_reader_permissions (const struct ddsi_proxy_
   /* relay_only is meaningless in all cases except the one where the access control plugin says otherwise */
   *relay_only = false;
 
-  if (!sc)
+  if (!sc || !wr->sec_attr)
     return true;
 
   if (!ddsi_omg_proxy_participant_is_secure (prd->c.proxypp))
   {
-    if (ddsi_omg_participant_allow_unauthenticated(pp))
+    if (ddsi_omg_participant_allow_unauthenticated(pp) &&
+        !wr->sec_attr->attr.is_read_protected && !wr->sec_attr->attr.is_write_protected)
     {
       GVTRACE(" allow non-secure remote reader "PGUIDFMT, PGUID(prd->e.guid));
       return true;
@@ -2451,7 +2479,18 @@ bool ddsi_omg_security_check_remote_reader_permissions (const struct ddsi_proxy_
     }
   }
 
-  if (!SECURITY_INFO_IS_READ_PROTECTED(prd->c.security_info))
+  /* Discovery can precede authentication, but user endpoints must wait for
+   * admission by their own local participant, even on unprotected topics. */
+  if (!ddsi_is_builtin_entityid (wr->e.guid.entityid, DDSI_VENDORID_ECLIPSE) &&
+      !proxypp_is_authenticated_with (prd->c.proxypp, pp))
+  {
+    GVTRACE ("Remote reader "PGUIDFMT" is not authenticated with participant "PGUIDFMT" yet\n", PGUID (prd->e.guid), PGUID (pp->e.guid));
+    return false;
+  }
+
+  /* The local policy determines whether to check permissions, even when the
+   * remote endpoint omits its security attributes or declares itself unprotected. */
+  if (!wr->sec_attr->attr.is_read_protected)
     return true;
 
   DDS_Security_PermissionsHandle permissions_handle;
@@ -2462,7 +2501,7 @@ bool ddsi_omg_security_check_remote_reader_permissions (const struct ddsi_proxy_
   }
 
   ddsi_omg_shallow_copy_SubscriptionBuiltinTopicDataSecure (&subscription_data, &prd->e.guid, prd->c.xqos, &prd->c.security_info);
-  bool result = sc->access_control_context->check_remote_datareader(sc->access_control_context, permissions_handle, (int)domain_id, &subscription_data, &sec_relay_only, &exception);
+  bool result = sc->access_control_context->check_remote_datareader(sc->access_control_context, permissions_handle, (int)gv->config.domainId, &subscription_data, &sec_relay_only, &exception);
   if (!result)
   {
     handle_not_allowed(gv, pp->sec_attr->permissions_handle, sc->access_control_context, &exception, subscription_data.topic_name,
@@ -2472,7 +2511,7 @@ bool ddsi_omg_security_check_remote_reader_permissions (const struct ddsi_proxy_
   {
     *relay_only = !!sec_relay_only;
     ddsi_omg_shallow_copy_TopicBuiltinTopicData (&topic_data, subscription_data.topic_name, subscription_data.type_name);
-    result = sc->access_control_context->check_remote_topic(sc->access_control_context, permissions_handle, (int)domain_id, &topic_data, &exception);
+    result = sc->access_control_context->check_remote_topic(sc->access_control_context, permissions_handle, (int)gv->config.domainId, &topic_data, &exception);
     ddsi_omg_shallow_free_TopicBuiltinTopicData (&topic_data);
     if (!result)
       handle_not_allowed(gv, pp->sec_attr->permissions_handle, sc->access_control_context, &exception, subscription_data.topic_name,
@@ -3677,9 +3716,11 @@ bool ddsi_security_decode_sec_prefix (const struct ddsi_receiver_state *rst, uns
   return result;
 }
 
-static ddsi_rtps_msg_state_t check_rtps_message_is_secure (struct ddsi_domaingv *gv, ddsi_rtps_header_t *hdr, const unsigned char *buff, bool isstream, struct ddsi_proxy_participant **proxypp)
+static ddsi_rtps_msg_state_t check_rtps_message_is_secure (struct ddsi_domaingv *gv, ddsi_rtps_header_t *hdr, const unsigned char *buff, size_t sz, bool isstream, struct ddsi_proxy_participant **proxypp)
 {
   const uint32_t offset = DDSI_RTPS_MESSAGE_HEADER_SIZE + (isstream ? sizeof (ddsi_rtps_msg_len_t) : 0);
+  if (sz < offset + DDSI_RTPS_SUBMESSAGE_HEADER_SIZE)
+    return DDSI_RTPS_MSG_STATE_PLAIN;
   const ddsi_rtps_submessage_header_t *submsg = (const ddsi_rtps_submessage_header_t *) (buff + offset);
   if (submsg->submessageId != DDSI_RTPS_SMID_SRTPS_PREFIX)
     return DDSI_RTPS_MSG_STATE_PLAIN;
@@ -3773,14 +3814,14 @@ ddsi_security_decode_rtps_message (
   struct ddsi_proxy_participant *proxypp;
   ddsi_rtps_msg_state_t ret;
   ddsi_thread_state_awake_fixed_domain (thrst);
-  ret = check_rtps_message_is_secure (gv, *hdr, *buff, isstream, &proxypp);
+  ret = check_rtps_message_is_secure (gv, *hdr, *buff, *sz, isstream, &proxypp);
   if (ret == DDSI_RTPS_MSG_STATE_ENCODED)
     ret = decode_rtps_message_awake (rmsg, hdr, buff, sz, rbpool, isstream, proxypp);
   ddsi_thread_state_asleep (thrst);
   return ret;
 }
 
-ssize_t
+dds_return_t
 ddsi_security_secure_conn_write(
     const struct ddsi_domaingv *gv,
     struct ddsi_tran_conn * conn,
@@ -3790,7 +3831,8 @@ ddsi_security_secure_conn_write(
     ddsi_rtps_msg_len_t *msg_len,
     bool dst_one,
     ddsi_msg_sec_info_t *sec_info,
-    ddsi_tran_write_fn_t conn_write_cb)
+    ddsi_tran_write_fn_t conn_write_cb,
+    size_t *bytes_written)
 {
   ddsi_rtps_header_t *hdr;
   ddsi_guid_t guid;
@@ -3845,10 +3887,8 @@ ddsi_security_secure_conn_write(
     }
   }
 
-  ssize_t ret = -1;
-  if (!ddsi_omg_security_encode_rtps_message (gv, sec_info->src_pp_handle, &guid, srcbuf, srclen, &dstbuf, &dstlen, dst_handle))
-    ret = -1;
-  else
+  dds_return_t ret = DDS_RETCODE_ERROR;
+  if (ddsi_omg_security_encode_rtps_message (gv, sec_info->src_pp_handle, &guid, srcbuf, srclen, &dstbuf, &dstlen, dst_handle))
   {
     if (conn->m_stream)
     {
@@ -3860,7 +3900,7 @@ ddsi_security_secure_conn_write(
         ((ddsrt_iovec_t){ .iov_base = (void *) msg_len, .iov_len = sizeof (*msg_len) }),
         ((ddsrt_iovec_t){ .iov_base = dstbuf + DDSI_RTPS_MESSAGE_HEADER_SIZE,
           .iov_len = (ddsrt_iov_len_t) (dstlen - DDSI_RTPS_MESSAGE_HEADER_SIZE) }));
-      ret = conn_write_cb (conn, dst, msgfrags, flags);
+      ret = conn_write_cb (conn, dst, msgfrags, flags, bytes_written);
     }
     else
     {
@@ -3868,7 +3908,7 @@ ddsi_security_secure_conn_write(
       msg_len->length = (uint32_t) dstlen;
       DDSI_DECL_CONST_TRAN_WRITE_MSGFRAGS_PTR(msgfrags,
         ((ddsrt_iovec_t){ .iov_base = dstbuf, .iov_len = (ddsrt_iov_len_t) dstlen }));
-      ret = conn_write_cb (conn, dst, msgfrags, flags);
+      ret = conn_write_cb (conn, dst, msgfrags, flags, bytes_written);
     }
     ddsrt_free (dstbuf);
   }
@@ -3928,9 +3968,9 @@ extern inline bool ddsi_omg_writer_is_submessage_protected (UNUSED_ARG(const str
 extern inline bool ddsi_omg_writer_is_payload_protected (UNUSED_ARG(const struct ddsi_writer *wr));
 
 extern inline void ddsi_omg_get_proxy_writer_security_info (UNUSED_ARG(struct ddsi_proxy_writer *pwr), UNUSED_ARG(const ddsi_plist_t *plist), UNUSED_ARG(ddsi_security_info_t *info));
-extern inline bool ddsi_omg_security_check_remote_writer_permissions (UNUSED_ARG(const struct ddsi_proxy_writer *pwr), UNUSED_ARG(uint32_t domain_id), UNUSED_ARG(struct ddsi_participant *pp));
+extern inline bool ddsi_omg_security_check_remote_writer_permissions (UNUSED_ARG(const struct ddsi_proxy_writer *pwr), UNUSED_ARG(const struct ddsi_reader *rd));
 extern inline void ddsi_omg_security_deregister_remote_writer_match (UNUSED_ARG(const struct ddsi_proxy_writer *pwr), UNUSED_ARG(const struct ddsi_reader *rd), UNUSED_ARG(struct ddsi_rd_pwr_match *match));
-extern inline bool ddsi_omg_security_check_remote_reader_permissions (UNUSED_ARG(const struct ddsi_proxy_reader *prd), UNUSED_ARG(uint32_t domain_id), UNUSED_ARG(struct ddsi_participant *par), UNUSED_ARG(bool *relay_only));
+extern inline bool ddsi_omg_security_check_remote_reader_permissions (UNUSED_ARG(const struct ddsi_proxy_reader *prd), UNUSED_ARG(const struct ddsi_writer *wr), UNUSED_ARG(bool *relay_only));
 extern inline void ddsi_omg_security_deregister_remote_reader_match (UNUSED_ARG(const struct ddsi_proxy_reader *prd), UNUSED_ARG(const struct ddsi_writer *wr), UNUSED_ARG(struct ddsi_wr_prd_match *match));
 
 extern inline unsigned ddsi_determine_subscription_writer(UNUSED_ARG(const struct ddsi_reader *rd));

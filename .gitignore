@@ -6,7 +6,14 @@ gen.*
 .vs/
 .vscode/
 build/
+build-*/
 *~
+*#*
 .zed
 .cache
+**/.DS_Store
 compile_commands.json
+.clangd
+
+libprotobuf-mutator/
+LPM/

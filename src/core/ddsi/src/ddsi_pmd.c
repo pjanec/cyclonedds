@@ -73,9 +73,10 @@ void ddsi_write_pmd_message (struct ddsi_thread_state * const thrst, struct ddsi
     pmd.kind = pmd_kind;
     pmd.value.length = (uint32_t) sizeof (data);
     pmd.value.value = data;
-    serdata = ddsi_serdata_from_sample (gv->pmd_type, SDK_DATA, &pmd);
-    serdata->timestamp = ddsrt_time_wallclock ();
+    if (ddsi_serdata_from_sample_err (&serdata, gv->pmd_type, SDK_DATA, &pmd) != DDS_RETCODE_OK)
+      return;
 
+    serdata->timestamp = ddsrt_time_wallclock ();
     tk = ddsi_tkmap_lookup_instance_ref (gv->m_tkmap, serdata);
     ddsi_write_sample_nogc (thrst, xp, wr, serdata, tk);
     ddsi_tkmap_instance_unref (gv->m_tkmap, tk);
@@ -87,40 +88,41 @@ void ddsi_handle_pmd_message (const struct ddsi_receiver_state *rst, struct ddsi
 {
   /* use sample with knowledge of internal representation: there's a deserialized sample inside already */
   const struct ddsi_serdata_pserop *sample = (const struct ddsi_serdata_pserop *) sample_common;
-  struct ddsi_proxy_participant *proxypp;
-  ddsi_guid_t ppguid;
-  struct ddsi_lease *l;
-  RSTTRACE (" PMD ST%"PRIx32, sample->c.statusinfo);
+  ddsi_participant_message_data_t const * const pmd = sample->sample;
+  RSTTRACE (" PMD ST%"PRIx32" pp %"PRIx32":%"PRIx32":%"PRIx32" kind %"PRIu32, sample->c.statusinfo, PGUIDPREFIX (pmd->participantGuidPrefix), pmd->kind);
+  if (memcmp (&pmd->participantGuidPrefix, &rst->src_guid_prefix, sizeof (rst->src_guid_prefix)) != 0)
+  {
+    RSTTRACE (" : mismatch with RTPS source "PGUIDPREFIXFMT"\n", PGUIDPREFIX(rst->src_guid_prefix));
+    return;
+  }
+  const ddsi_guid_t ppguid = { .prefix = pmd->participantGuidPrefix, .entityid = { .u = DDSI_ENTITYID_PARTICIPANT } };
+  struct ddsi_proxy_participant * const proxypp = ddsi_entidx_lookup_proxy_participant_guid (rst->gv->entity_index, &ppguid);
+  if (proxypp == NULL)
+  {
+    RSTTRACE (": unknown proxy participant\n");
+    return;
+  }
   switch (sample->c.statusinfo & (DDSI_STATUSINFO_DISPOSE | DDSI_STATUSINFO_UNREGISTER))
   {
-    case 0: {
-      const ddsi_participant_message_data_t *pmd = sample->sample;
-      RSTTRACE (" pp %"PRIx32":%"PRIx32":%"PRIx32" kind %"PRIu32" data %"PRIu32, PGUIDPREFIX (pmd->participantGuidPrefix), pmd->kind, pmd->value.length);
-      ppguid.prefix = pmd->participantGuidPrefix;
-      ppguid.entityid.u = DDSI_ENTITYID_PARTICIPANT;
-      if ((proxypp = ddsi_entidx_lookup_proxy_participant_guid (rst->gv->entity_index, &ppguid)) == NULL)
-        RSTTRACE (" PPunknown");
-      else if (pmd->kind == DDSI_PARTICIPANT_MESSAGE_DATA_KIND_MANUAL_LIVELINESS_UPDATE &&
-               (l = ddsrt_atomic_ldvoidp (&proxypp->minl_man)) != NULL)
+    case 0:
+      RSTTRACE (" data %"PRIu32, pmd->value.length);
+      if (pmd->kind == DDSI_PARTICIPANT_MESSAGE_DATA_KIND_MANUAL_LIVELINESS_UPDATE)
       {
         /* Renew lease for entity with shortest manual-by-participant lease */
-        ddsi_lease_renew (l, ddsrt_time_elapsed ());
+        struct ddsi_lease * const l = ddsrt_atomic_ldvoidp (&proxypp->minl_man);
+        if (l != NULL)
+          ddsi_lease_renew (l, ddsrt_time_elapsed ());
       }
       break;
-    }
 
     case DDSI_STATUSINFO_DISPOSE:
     case DDSI_STATUSINFO_UNREGISTER:
-    case DDSI_STATUSINFO_DISPOSE | DDSI_STATUSINFO_UNREGISTER: {
-      const ddsi_participant_message_data_t *pmd = sample->sample;
-      ppguid.prefix = pmd->participantGuidPrefix;
-      ppguid.entityid.u = DDSI_ENTITYID_PARTICIPANT;
+    case DDSI_STATUSINFO_DISPOSE | DDSI_STATUSINFO_UNREGISTER:
       if (ddsi_delete_proxy_participant_by_guid (rst->gv, &ppguid, sample->c.timestamp, false) < 0)
-        RSTTRACE (" unknown");
+        RSTTRACE (": unknown");
       else
-        RSTTRACE (" delete");
+        RSTTRACE (": delete");
       break;
-    }
   }
   RSTTRACE ("\n");
 }

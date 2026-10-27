@@ -19,6 +19,7 @@
 #include "dds/ddsrt/avl.h"
 #include "dds/ddsi/ddsi_guid.h"
 #include "dds/ddsi/ddsi_typewrap.h"
+#include "dds/ddsi/ddsi_xt_typemap.h"
 #include "dds/ddsi/ddsi_sertype.h"
 #include "dds/ddsi/ddsi_typelib.h"
 
@@ -30,7 +31,12 @@ extern const ddsrt_avl_treedef_t ddsi_typelib_treedef;
 extern const ddsrt_avl_treedef_t ddsi_typedeps_treedef;
 extern const ddsrt_avl_treedef_t ddsi_typedeps_reverse_treedef;
 
+const ddsrt_avl_treedef_t *ddsi_get_typelib_treedef (void);
+const ddsrt_avl_treedef_t *ddsi_get_typedeps_treedef (void);
+const ddsrt_avl_treedef_t *ddsi_get_typedeps_reverse_treedef (void);
+
 struct ddsi_domaingv;
+struct ddsrt_hh;
 struct ddsi_sertype;
 struct ddsi_type;
 struct ddsi_type_pair;
@@ -43,14 +49,50 @@ enum ddsi_type_state {
   DDSI_TYPE_PARTIAL_RESOLVED,
   DDSI_TYPE_RESOLVED,
   DDSI_TYPE_INVALID,
-  DDSI_TYPE_CONSTRUCTING
+  DDSI_TYPE_CONSTRUCTING,
+  DDSI_TYPE_COMPLETING,
+  DDSI_TYPE_REPLACED
 };
 
+#ifndef NDEBUG
 /** @component type_system */
-dds_return_t ddsi_type_register_dep (struct ddsi_domaingv *gv, const ddsi_typeid_t *src_type_id, struct ddsi_type **dst_dep_type, const struct DDS_XTypes_TypeIdentifier *dep_type_id);
+void ddsi_typelib_dump_if_not_empty (struct ddsi_domaingv *gv)
+  ddsrt_nonnull_all;
+#endif
+
+/** @component type_system */
+struct ddsrt_hh *ddsi_type_visit_new (void)
+  ddsrt_attribute_warn_unused_result;
+
+/** @component type_system */
+void ddsi_type_visit_free (struct ddsrt_hh *visited)
+  ddsrt_nonnull_all;
+
+/** @component type_system */
+bool ddsi_type_visit_seen (struct ddsrt_hh *visited, const struct ddsi_type *type)
+  ddsrt_nonnull_all;
+
+/**
+ * Registers dep_type_id as a dependency of src_type_id.
+ *
+ * On success, *dst_dep_type is a referenced dependency type.
+ * @component type_system
+ */
+dds_return_t ddsi_type_register_dep (struct ddsi_domaingv *gv, const ddsi_typeid_t *src_type_id, struct ddsi_type **dst_dep_type, const struct DDS_XTypes_TypeIdentifier *dep_type_id)
+  ddsrt_nonnull_all;
 
 /** @component type_system */
 void ddsi_type_ref_locked (struct ddsi_domaingv *gv, struct ddsi_type **type, const struct ddsi_type *src);
+
+/** @component type_system */
+void ddsi_type_replace_locked (struct ddsi_domaingv *gv, struct ddsi_type *type, const struct ddsi_type *replacement);
+
+/** @component type_system */
+void ddsi_type_canonicalize_locked (struct ddsi_domaingv *gv, struct ddsi_type **type);
+
+/** @component type_system */
+void ddsi_type_ref_dep_locked (struct ddsi_domaingv *gv, const struct ddsi_type *owner, struct ddsi_type **type, const struct ddsi_type *src)
+  ddsrt_nonnull((1,3,4));
 
 /** @component type_system */
 dds_return_t ddsi_type_ref_id_locked (struct ddsi_domaingv *gv, struct ddsi_type **type, const ddsi_typeid_t *type_id);
@@ -61,6 +103,27 @@ dds_return_t ddsi_type_ref_proxy (struct ddsi_domaingv *gv, struct ddsi_type **t
 /** @component type_system */
 dds_return_t ddsi_type_add_typeobj (struct ddsi_domaingv *gv, struct ddsi_type *type, const struct DDS_XTypes_TypeObject *type_obj)
   ddsrt_attribute_warn_unused_result ddsrt_nonnull_all;
+
+/**
+ * Installs verified SCC TypeObjects without acquiring a reference for the caller.
+ * The caller must retain a reference keeping the component alive if it needs to
+ * use the installed types after this call.
+ * @component type_system
+ */
+dds_return_t ddsi_type_add_scc_typeobjs_locked (
+    struct ddsi_domaingv *gv,
+    const dds_sequence_DDS_XTypes_TypeIdentifierTypeObjectPair *pairs,
+    const struct DDS_XTypes_TypeIdentifier *type_id,
+    bool require_complete,
+    bool *complete)
+  ddsrt_attribute_warn_unused_result ddsrt_nonnull_all;
+
+/** @component type_system */
+dds_return_t ddsi_type_scc_attach_locked (struct ddsi_domaingv *gv, struct ddsi_type *type, const struct DDS_XTypes_StronglyConnectedComponentId *id)
+  ddsrt_attribute_warn_unused_result ddsrt_nonnull_all;
+
+/** @component type_system */
+void ddsi_type_update_state_locked (struct ddsi_domaingv *gv, struct ddsi_type *type) ddsrt_nonnull_all;
 
 /** @component type_system */
 dds_return_t ddsi_type_get_typeinfo_ser (struct ddsi_domaingv *gv, const struct ddsi_type *type_c, unsigned char **data, uint32_t *sz);
@@ -74,11 +137,12 @@ dds_return_t ddsi_type_get_typeinfo_ser (struct ddsi_domaingv *gv, const struct 
  * complete type. The provided type should exist in the type library and
  * should be resolved.
  *
- * The corresponding minimal type is calculated from the complete type,
- * and if it is not in the type library, it is added with a refcount
- * of 1. This applies to the top-level minimal type and all underlying
- * dependencies. The refcount for the complete type is also incremented
- * by this function.
+ * The corresponding minimal type is calculated from the complete type.  If
+ * it is not in the type library, it is added.  For SCC identifiers, the
+ * generated minimal component is verified as a whole and materialized so
+ * TypeLookup can return the component by its minimal SCC id.  The refcounts
+ * for the complete type and the top-level minimal type are incremented by
+ * this function.
  *
  * @param gv  domain globals
  * @param type_c  the complete DDSI type
@@ -90,6 +154,10 @@ dds_return_t ddsi_type_get_typeinfo_locked (struct ddsi_domaingv *gv, struct dds
 
 /** @component type_system */
 dds_return_t ddsi_type_get_typemap_ser (struct ddsi_domaingv *gv, const struct ddsi_type *type, unsigned char **data, uint32_t *sz);
+
+/** @component type_system */
+void ddsi_type_unref_dep_locked (struct ddsi_domaingv *gv, const struct ddsi_type *owner, struct ddsi_type *type)
+  ddsrt_nonnull((1));
 
 /** @component type_system */
 void ddsi_type_unreg_proxy (struct ddsi_domaingv *gv, struct ddsi_type *type, const ddsi_guid_t *proxy_guid);

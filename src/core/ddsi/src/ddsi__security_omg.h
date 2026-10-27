@@ -57,6 +57,7 @@ struct ddsi_pp_proxypp_match {
   ddsrt_avl_node_t avlnode;
   ddsi_guid_t proxypp_guid;
   DDS_Security_ParticipantCryptoHandle proxypp_crypto_handle;
+  bool authenticated;
 };
 
 struct ddsi_proxypp_pp_match {
@@ -633,22 +634,22 @@ bool ddsi_omg_writer_is_submessage_protected (const struct ddsi_writer *wr);
 bool ddsi_omg_writer_is_payload_protected (const struct ddsi_writer *wr);
 
 /**
- * @brief Check if the remote writer is allowed to communicate with endpoints of the
- *        local participant.
+ * @brief Check if the remote writer is allowed to communicate with the local reader.
  * @component security_entity
  *
- * This function will check with the access control plugin if the remote writer
- * is allowed to communicate with this participant.
+ * The local reader's security attributes determine whether to check the remote
+ * writer's permissions with the access control plugin.
+ * A secure remote participant's user endpoints must first be authenticated and
+ * admitted by the local reader's participant, even on unprotected topics.
  *
  * @param[in] pwr       The remote writer.
- * @param[in] domain_id The domain id.
- * @param[in] pp        The local participant.
+ * @param[in] rd        The local reader.
  *
  * @returns bool
  * @retval true   The remote writer is allowed to communicate.
  * @retval false  Otherwise.
  */
-bool ddsi_omg_security_check_remote_writer_permissions (const struct ddsi_proxy_writer *pwr, uint32_t domain_id, struct ddsi_participant *pp);
+bool ddsi_omg_security_check_remote_writer_permissions (const struct ddsi_proxy_writer *pwr, const struct ddsi_reader *rd);
 
 /**
  * @brief Check it the remote writer is allowed to communicate with the local reader.
@@ -734,16 +735,16 @@ bool ddsi_omg_reader_is_discovery_protected (const struct ddsi_reader *rd);
 bool ddsi_omg_reader_is_submessage_protected (const struct ddsi_reader *rd);
 
 /**
- * @brief Check if the remote reader is allowed to communicate with endpoints of the
- *        local participant.
+ * @brief Check if the remote reader is allowed to communicate with the local writer.
  * @component security_entity
  *
- * This function will check with the access control plugin if the remote reader
- * is allowed to communicate with this participant.
+ * The local writer's security attributes determine whether to check the remote
+ * reader's permissions with the access control plugin.
+ * A secure remote participant's user endpoints must first be authenticated and
+ * admitted by the local writer's participant, even on unprotected topics.
  *
  * @param[in] prd         The remote reader.
- * @param[in] domain_id   The domain id.
- * @param[in] pp          The local participant.
+ * @param[in] wr          The local writer.
  * @param[out] relay_only The "relay_only" value returned by the access control
  *                        operation check_remote_datareader()
  *
@@ -751,7 +752,7 @@ bool ddsi_omg_reader_is_submessage_protected (const struct ddsi_reader *rd);
  * @retval true   The remote reader is allowed to communicate.
  * @retval false  Otherwise; relay_only is unspecified.
  */
-bool ddsi_omg_security_check_remote_reader_permissions (const struct ddsi_proxy_reader *prd, uint32_t domain_id, struct ddsi_participant *pp, bool *relay_only);
+bool ddsi_omg_security_check_remote_reader_permissions (const struct ddsi_proxy_reader *prd, const struct ddsi_writer *wr, bool *relay_only);
 
 
 /**
@@ -1055,12 +1056,11 @@ ddsi_rtps_msg_state_t ddsi_security_decode_rtps_message (struct ddsi_thread_stat
  * @param[in]     dst_one       Is there only one specific destination?
  * @param[in]     sec_info      Security information for handles.
  * @param[in]     conn_write_cb Function to call to do the actual writing.
+ * @param[out]    bytes_written Optional, number of bytes written
  *
- * @returns ssize_t
- * @retval negative/zero    Something went wrong.
- * @retval positive         Secure writing succeeded.
+ * @returns dds_return_t
  */
-ssize_t
+dds_return_t
 ddsi_security_secure_conn_write(
     const struct ddsi_domaingv *gv,
     struct ddsi_tran_conn * conn,
@@ -1070,7 +1070,9 @@ ddsi_security_secure_conn_write(
     ddsi_rtps_msg_len_t *msg_len,
     bool dst_one,
     ddsi_msg_sec_info_t *sec_info,
-    ddsi_tran_write_fn_t conn_write_cb);
+    ddsi_tran_write_fn_t conn_write_cb,
+    size_t *bytes_written)
+  ddsrt_nonnull ((1, 2, 3, 4, 6, 8, 9));
 
 
 /**
@@ -1261,7 +1263,7 @@ inline bool ddsi_omg_writer_is_payload_protected (UNUSED_ARG(const struct ddsi_w
   return false;
 }
 
-inline bool ddsi_omg_security_check_remote_writer_permissions (UNUSED_ARG(const struct ddsi_proxy_writer *pwr), UNUSED_ARG(uint32_t domain_id), UNUSED_ARG(struct ddsi_participant *pp))
+inline bool ddsi_omg_security_check_remote_writer_permissions (UNUSED_ARG(const struct ddsi_proxy_writer *pwr), UNUSED_ARG(const struct ddsi_reader *rd))
 {
   return true;
 }
@@ -1281,7 +1283,7 @@ inline bool ddsi_omg_reader_is_submessage_protected (UNUSED_ARG(const struct dds
 }
 
 
-inline bool ddsi_omg_security_check_remote_reader_permissions (UNUSED_ARG(const struct ddsi_proxy_reader *prd), UNUSED_ARG(uint32_t domain_id), UNUSED_ARG(struct ddsi_participant *pp), UNUSED_ARG(bool *relay_only))
+inline bool ddsi_omg_security_check_remote_reader_permissions (UNUSED_ARG(const struct ddsi_proxy_reader *prd), UNUSED_ARG(const struct ddsi_writer *wr), UNUSED_ARG(bool *relay_only))
 {
   *relay_only = false;
   return true;

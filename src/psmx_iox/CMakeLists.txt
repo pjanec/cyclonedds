@@ -9,7 +9,6 @@
 #
 # SPDX-License-Identifier: EPL-2.0 OR BSD-3-Clause
 #
-set(CMAKE_CXX_STANDARD 17)
 include(GenerateExportHeader)
 
 if(ENABLE_ICEORYX2)
@@ -30,8 +29,8 @@ if(ENABLE_ICEORYX2)
   generate_export_header(psmx_iox2 BASE_NAME DDS_PSMX_IOX2 EXPORT_FILE_NAME "${CMAKE_CURRENT_BINARY_DIR}/include/psmx_iox2_export.h")
 
   target_include_directories(psmx_iox2 PRIVATE
-    "$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/src/ddsrt/include>"
-    "$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/src/core/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../ddsrt/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../core/ddsc/include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../ddsrt/include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../core/ddsc/include>"
@@ -42,6 +41,10 @@ if(ENABLE_ICEORYX2)
   if(BUILD_SHARED_LIBS)
     target_link_libraries(psmx_iox2 PRIVATE ddsc)
   endif()
+
+  target_compile_definitions(psmx_iox2 PRIVATE PSMX_IOX2_MAJOR=${iceoryx2-c_VERSION_MAJOR})
+  target_compile_definitions(psmx_iox2 PRIVATE PSMX_IOX2_MINOR=${iceoryx2-c_VERSION_MINOR})
+  target_compile_definitions(psmx_iox2 PRIVATE PSMX_IOX2_PATCH=${iceoryx2-c_VERSION_PATCH})
 
   if(MSVC)
     target_compile_definitions(psmx_iox2 PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -54,6 +57,8 @@ if(ENABLE_ICEORYX2)
 endif()
 
 if(ENABLE_ICEORYX)
+  enable_language(CXX)
+  set(CMAKE_CXX_STANDARD 17)
   message(STATUS "Building Iceoryx PSMX plugin")
   set(psmx_iox_sources
     src/psmx_iox_impl.cpp
@@ -73,8 +78,8 @@ if(ENABLE_ICEORYX)
   generate_export_header(psmx_iox BASE_NAME DDS_PSMX_IOX EXPORT_FILE_NAME "${CMAKE_CURRENT_BINARY_DIR}/include/psmx_iox_export.h")
 
   target_include_directories(psmx_iox PRIVATE
-    "$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/src/ddsrt/include>"
-    "$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/src/core/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../ddsrt/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../core/ddsc/include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../ddsrt/include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../core/ddsc/include>"

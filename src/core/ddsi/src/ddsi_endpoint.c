@@ -397,10 +397,11 @@ void ddsi_deliver_historical_data (const struct ddsi_writer *wr, const struct dd
   while (ddsi_whc_sample_iter_borrow_next (&it, &sample))
   {
     struct ddsi_serdata *payload;
-    if ((payload = ddsi_serdata_ref_as_type (rd->type, sample.serdata)) == NULL)
+    if (ddsi_serdata_ref_as_type (&payload, rd->type, sample.serdata) != DDS_RETCODE_OK)
     {
-      GVWARNING ("local: deserialization of %s/%s as %s/%s failed in topic type conversion\n",
-                 wr->xqos->topic_name, wr->type->type_name, rd->xqos->topic_name, rd->type->type_name);
+      if (payload == NULL)
+        GVWARNING ("local: deserialization of %s/%s as %s/%s failed in topic type conversion\n",
+                   wr->xqos->topic_name, wr->type->type_name, rd->xqos->topic_name, rd->type->type_name);
     }
     else
     {
@@ -899,9 +900,9 @@ static void ddsi_new_writer_guid_common_init (struct ddsi_writer *wr, const char
       wr->ssm_as = ddsi_new_addrset ();
       for (int i = 0; i < gv->n_interfaces; i++)
       {
-        if ((gv->interfaces[i].allow_multicast & DDSI_AMC_SSM) && ddsi_factory_supports(gv->xmit_conns[i]->m_factory, base_ssm_loc->kind))
+        if ((gv->interfaces[i].allow_multicast & DDSI_AMC_SSM) && ddsi_factory_supports(gv->xmit_conns_data[i]->m_factory, base_ssm_loc->kind))
         {
-          ddsi_xlocator_t loc = { .conn = gv->xmit_conns[i], .c = *base_ssm_loc };
+          ddsi_xlocator_t loc = { .conn = gv->xmit_conns_data[i], .c = *base_ssm_loc };
           ddsi_add_xlocator_to_addrset (gv, wr->ssm_as, &loc);
         }
       }
@@ -1536,11 +1537,6 @@ dds_return_t ddsi_new_reader (struct ddsi_reader **rd_out, const struct ddsi_gui
   rd->status_cb_entity = status_entity;
   rd->rhc = rhc;
   ddsrt_atomic_st64 (&rd->received_bytes, (uint64_t) 0);
-  /* set rhc qos for reader */
-  if (rhc)
-  {
-    ddsi_rhc_set_qos (rd->rhc, rd->xqos);
-  }
   assert (rd->xqos->present & DDSI_QP_LIVELINESS);
 
 #ifdef DDS_HAS_SECURITY

@@ -12,6 +12,8 @@
 include(CUnit)
 
 set(ddsi_test_sources
+    "bitset.c"
+    "bswap.c"
     "ipaddr.c"
     "locators.c"
     "plist_generic.c"
@@ -20,11 +22,15 @@ set(ddsi_test_sources
     "pmd_message.c"
     "radmin.c"
     "receive_packet.c"
+    "serdata.c"
     "sysdeps.c"
     "wraddrset.c")
 
 if(ENABLE_SECURITY)
   set(ddsi_test_sources ${ddsi_test_sources} "security_msg.c")
+endif()
+if(ENABLE_FAKEUDP)
+  set(ddsi_test_sources ${ddsi_test_sources} "fakeudp.c")
 endif()
 
 add_cunit_executable(cunit_ddsi ${ddsi_test_sources})

@@ -99,23 +99,28 @@
       return SD_PARSE_RESULT_ERR; \
   }
 
+#define CREATE_NODE_LIST_ST(pstate, element_type, element_kind, element_init, element_fini, element_name, parent_type, parent_kind, current) \
+do { \
+  struct parent_type *parent = (struct parent_type *) current; \
+  _CREATE_NODE(pstate, element_type, element_kind, ELEMENT_DATA_TYPE_GENERIC, parent_kind, current, element_init, element_fini); \
+  if (parent->element_name == NULL) { \
+    parent->element_name = (struct element_type *) current; \
+  } else { \
+    struct xml_element *tail = (struct xml_element *) parent->element_name; \
+    while (tail->next != NULL) { \
+      tail = tail->next; \
+    } \
+    tail->next = current; \
+  } \
+} while (0)
+
 #define CREATE_NODE_LIST(pstate, element_type, element_kind, element_init, element_fini, element_name, parent_type, parent_kind, current) \
   do { \
-    struct parent_type *parent = (struct parent_type *) current; \
-    _CREATE_NODE(pstate, element_type, element_kind, ELEMENT_DATA_TYPE_GENERIC, parent_kind, current, element_init, element_fini); \
-    if (parent->element_name == NULL) { \
-      parent->element_name = (struct element_type *) current; \
-    } else { \
-      struct xml_element *tail = (struct xml_element *) parent->element_name; \
-      while (tail->next != NULL) { \
-        tail = tail->next; \
-      } \
-      tail->next = current; \
-    } \
+    CREATE_NODE_LIST_ST(pstate, element_type, element_kind, element_init, element_fini, element_name, parent_type, parent_kind, current); \
     goto status_ok; \
   } while (0)
 
-#define CREATE_NODE_SINGLE(pstate, element_type, element_kind, element_init, element_fini, element_name, parent_type, parent_kind, current) \
+#define CREATE_NODE_SINGLE_ST(pstate, element_type, element_kind, element_init, element_fini, element_name, parent_type, parent_kind, current) \
   do { \
     struct parent_type *parent = (struct parent_type *) current; \
     if (parent->element_name != NULL) { \
@@ -124,6 +129,12 @@
     } \
     _CREATE_NODE(pstate, element_type, element_kind, ELEMENT_DATA_TYPE_GENERIC, parent_kind, current, element_init, element_fini); \
     parent->element_name = (struct element_type *) current; \
+    goto status_ok; \
+  } while (0)
+
+#define CREATE_NODE_SINGLE(pstate, element_type, element_kind, element_init, element_fini, element_name, parent_type, parent_kind, current) \
+  do { \
+    CREATE_NODE_SINGLE_ST(pstate, element_type, element_kind, element_init, element_fini, element_name, parent_type, parent_kind, current); \
     goto status_ok; \
   } while (0)
 
@@ -204,8 +215,8 @@ static bool dds_sysdef_is_valid_identifier (const char *name);
 static bool str_to_int32 (const char *str, int32_t *value)
 {
   char *endptr;
-  long long l;
-  if (ddsrt_strtoll (str, &endptr, 0, &l) != DDS_RETCODE_OK || l < INT32_MIN || l > INT32_MAX) {
+  int64_t l;
+  if (ddsrt_strtoint64 (str, &endptr, 0, &l) != DDS_RETCODE_OK || l < INT32_MIN || l > INT32_MAX) {
     return false;
   }
   *value = (int32_t) l;
@@ -215,8 +226,8 @@ static bool str_to_int32 (const char *str, int32_t *value)
 static bool str_to_uint8 (const char *str, uint8_t *value)
 {
   char *endptr;
-  long long l;
-  if (ddsrt_strtoll (str, &endptr, 0, &l) != DDS_RETCODE_OK || l < 0 || l > UINT8_MAX) {
+  uint64_t l;
+  if (ddsrt_strtouint64 (str, &endptr, 0, &l) != DDS_RETCODE_OK || l > UINT8_MAX) {
     return false;
   }
   *value = (uint8_t) l;
@@ -226,8 +237,8 @@ static bool str_to_uint8 (const char *str, uint8_t *value)
 static bool str_to_uint16 (const char *str, uint16_t *value)
 {
   char *endptr;
-  long long l;
-  if (ddsrt_strtoll (str, &endptr, 0, &l) != DDS_RETCODE_OK || l < 0 || l > UINT16_MAX) {
+  uint64_t l;
+  if (ddsrt_strtouint64 (str, &endptr, 0, &l) != DDS_RETCODE_OK || l > UINT16_MAX) {
     return false;
   }
   *value = (uint16_t) l;
@@ -237,8 +248,8 @@ static bool str_to_uint16 (const char *str, uint16_t *value)
 static bool str_to_uint32 (const char *str, uint32_t *value)
 {
   char *endptr;
-  long long l;
-  if (ddsrt_strtoll (str, &endptr, 0, &l) != DDS_RETCODE_OK || l < 0 || l > UINT32_MAX) {
+  uint64_t l;
+  if (ddsrt_strtouint64 (str, &endptr, 0, &l) != DDS_RETCODE_OK || l > UINT32_MAX) {
     return false;
   }
   *value = (uint32_t) l;
@@ -248,11 +259,9 @@ static bool str_to_uint32 (const char *str, uint32_t *value)
 static bool str_to_int64 (const char *str, int64_t *value)
 {
   char *endptr;
-  long long l;
-  if (ddsrt_strtoll (str, &endptr, 0, &l) != DDS_RETCODE_OK || l < INT64_MIN || l > INT64_MAX) {
+  if (ddsrt_strtoint64 (str, &endptr, 0, value) != DDS_RETCODE_OK) {
     return false;
   }
-  *value = (int64_t) l;
   return (*endptr == '\0');
 }
 
@@ -268,7 +277,7 @@ static bool str_to_bool (const char *str, bool *value)
   return true;
 }
 
-static struct xml_element *new_node (struct parse_sysdef_state * const pstate, enum element_kind kind, enum element_data_type data_type, struct xml_element *parent, size_t size, init_fn init, fini_fn fini)
+static struct xml_element *new_node (struct parse_sysdef_state * const pstate, enum element_kind kind, enum element_data_type data_type, struct xml_element *parent, size_t size, xml_node_init_fn init, xml_node_fini_fn fini)
 {
   struct xml_element *e = ddsrt_malloc (size);
   if (e == NULL) {
@@ -881,11 +890,42 @@ static int split_ref (const char *ref, char **lib, char **local_name)
     return *type != NULL ? SD_PARSE_RESULT_OK : SD_PARSE_RESULT_INVALID_REF; \
   }
 
-RESOLVE_REF_FNDEF(qos_profile, qos, qos_profiles)
 RESOLVE_REF_FNDEF(domain, domain, domains)
 RESOLVE_REF_FNDEF(participant, participant, participants)
 RESOLVE_REF_FNDEF(node, node, nodes)
 RESOLVE_REF_FNDEF(application, application, applications)
+
+static int proc_attr_resolve_qos_profile_ref (struct parse_sysdef_state * const pstate, const char *type_ref, struct dds_sysdef_qos_profile **qos_profile)
+{
+  char *lib_name, *local_name;
+  if (*qos_profile != NULL)
+    return SD_PARSE_RESULT_DUPLICATE;
+
+  struct dds_sysdef_qos_lib *lib = NULL;
+  if (split_ref (type_ref, &lib_name, &local_name) != SD_PARSE_RESULT_OK)
+  {
+    struct xml_element *cur = pstate->current->parent;
+    while (cur != NULL && cur->kind != ELEMENT_KIND_QOS_LIB)
+      cur = cur->parent;
+
+    if (cur != NULL)
+      lib = (struct dds_sysdef_qos_lib *) cur;
+    else
+      return SD_PARSE_RESULT_ERR;
+
+    lib_name = ddsrt_strdup(lib->name);
+    local_name = ddsrt_strdup(type_ref);
+  } else {
+    _RESOLVE_LIB (qos, lib_name, lib);
+  }
+
+  if (lib != NULL)
+    _RESOLVE_ENTITY(lib, qos_profile, qos_profiles, local_name, *qos_profile);
+  ddsrt_free (lib_name);
+  ddsrt_free (local_name);
+
+  return *qos_profile != NULL ? SD_PARSE_RESULT_OK : SD_PARSE_RESULT_INVALID_REF;
+}
 
 enum resolve_endpoint_kind {
   RESOLVE_ENDPOINT_READER,
@@ -1079,7 +1119,8 @@ static int proc_attr (void *varg, UNUSED_ARG (uintptr_t eleminfo), const char *n
   struct parse_sysdef_state * const pstate = varg;
   bool attr_processed = false;
 
-  if (ddsrt_strcasecmp(name, "xmlns") == 0 || ddsrt_strcasecmp(name, "xmlns:xsi") == 0 ||ddsrt_strcasecmp(name, "xsi:schemaLocation") == 0)
+  if (ddsrt_strcasecmp(name, "xmlns") == 0 || ddsrt_strcasecmp(name, "xmlns:xsi") == 0 ||
+      ddsrt_strcasecmp(name, "xsi:schemaLocation") == 0 || ddsrt_strcasecmp(name, "xsi:noNamespaceSchemaLocation") == 0)
     return 0;
 
   int ret = SD_PARSE_RESULT_OK;
@@ -1630,205 +1671,203 @@ static int proc_elem_close (void *varg, UNUSED_ARG (uintptr_t eleminfo), UNUSED_
   int ret = SD_PARSE_RESULT_OK;
   if (pstate->current == NULL) {
     PARSER_ERROR (pstate, line, "Current element NULL in close element");
-    ret = SD_PARSE_RESULT_ERR;
+    return SD_PARSE_RESULT_ERR;
   }
-  else
+
+  switch (pstate->current->kind)
   {
-    switch (pstate->current->kind)
-    {
-      case ELEMENT_KIND_QOS_POLICY_DEADLINE:
-        ELEM_CLOSE_QOS_POLICY(DEADLINE, "Deadline");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_DEADLINE_PERIOD:
-        ELEM_CLOSE_QOS_DURATION_PROPERTY(DEADLINE, PERIOD, deadline);
-        break;
-      case ELEMENT_KIND_QOS_POLICY_DESTINATIONORDER:
-        ELEM_CLOSE_QOS_POLICY(DESTINATIONORDER, "Destination Order");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_DURABILITY:
-        ELEM_CLOSE_QOS_POLICY(DURABILITY, "Durability");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_DURABILITYSERVICE: {
-        struct dds_sysdef_QOS_POLICY_DURABILITYSERVICE *tmp_qp = (struct dds_sysdef_QOS_POLICY_DURABILITYSERVICE *) pstate->current;
-        if ((tmp_qp->populated & QOS_POLICY_DURABILITYSERVICE_PARAM_HISTORY_KIND) && tmp_qp->values.history.kind == DDS_HISTORY_KEEP_ALL)
-          tmp_qp->populated |= QOS_POLICY_DURABILITYSERVICE_PARAM_HISTORY_DEPTH;
-        ELEM_CLOSE_QOS_POLICY(DURABILITYSERVICE, "Durability Service");
-        break;
-      }
-      case ELEMENT_KIND_QOS_POLICY_DURABILITYSERVICE_SERVICE_CLEANUP_DELAY:
-        ELEM_CLOSE_QOS_DURATION_PROPERTY(DURABILITYSERVICE, SERVICE_CLEANUP_DELAY, service_cleanup_delay);
-        break;
-      case ELEMENT_KIND_QOS_POLICY_HISTORY: {
-        struct dds_sysdef_QOS_POLICY_HISTORY *tmp_qp = (struct dds_sysdef_QOS_POLICY_HISTORY *) pstate->current;
-        if ((tmp_qp->populated & QOS_POLICY_HISTORY_PARAM_KIND) && tmp_qp->values.kind == DDS_HISTORY_KEEP_ALL)
-          tmp_qp->populated |= QOS_POLICY_HISTORY_PARAM_DEPTH;
-        ELEM_CLOSE_QOS_POLICY(HISTORY, "History");
-        break;
-      }
-      case ELEMENT_KIND_QOS_POLICY_LATENCYBUDGET:
-        ELEM_CLOSE_QOS_POLICY(LATENCYBUDGET, "Latency Budget");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_LATENCYBUDGET_DURATION:
-        ELEM_CLOSE_QOS_DURATION_PROPERTY(LATENCYBUDGET, DURATION, duration);
-        break;
-      case ELEMENT_KIND_QOS_POLICY_LIFESPAN:
-        ELEM_CLOSE_QOS_POLICY(LIFESPAN, "Lifespan");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_LIFESPAN_DURATION:
-        ELEM_CLOSE_QOS_DURATION_PROPERTY(LIFESPAN, DURATION, duration);
-        break;
-      case ELEMENT_KIND_QOS_POLICY_LIVELINESS:
-        ELEM_CLOSE_QOS_POLICY(LIVELINESS, "Liveliness");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_LIVELINESS_LEASE_DURATION:
-        ELEM_CLOSE_QOS_DURATION_PROPERTY(LIVELINESS, LEASE_DURATION, lease_duration);
-        break;
-      case ELEMENT_KIND_QOS_POLICY_OWNERSHIP:
-        ELEM_CLOSE_QOS_POLICY(OWNERSHIP, "Ownership");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_OWNERSHIPSTRENGTH:
-        ELEM_CLOSE_QOS_POLICY(OWNERSHIPSTRENGTH, "Ownership Strength");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_OWNERSHIPSTRENGTH_VALUE:
-        break;
-      case ELEMENT_KIND_QOS_POLICY_PARTITION:
-        ELEM_CLOSE_QOS_POLICY(PARTITION, "Partition");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_TYPECONSISTENCYENFORCEMENT:
-        ELEM_CLOSE_QOS_POLICY(TYPECONSISTENCYENFORCEMENT, "Type consistency");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_DATAREPRESENTATION:
-        ELEM_CLOSE_QOS_POLICY(DATAREPRESENTATION, "Data representation");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_PRESENTATION:
-        ELEM_CLOSE_QOS_POLICY(PRESENTATION, "Presentation");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_READERDATALIFECYCLE_AUTOPURGE_NOWRITER_SAMPLES_DELAY:
-        ELEM_CLOSE_QOS_DURATION_PROPERTY(READERDATALIFECYCLE, AUTOPURGE_NOWRITER_SAMPLES_DELAY, autopurge_nowriter_samples_delay);
-        break;
-      case ELEMENT_KIND_QOS_POLICY_READERDATALIFECYCLE_AUTOPURGE_DISPOSED_SAMPLES_DELAY:
-        ELEM_CLOSE_QOS_DURATION_PROPERTY(READERDATALIFECYCLE, AUTOPURGE_DISPOSED_SAMPLES_DELAY, autopurge_disposed_samples_delay);
-        break;
-      case ELEMENT_KIND_QOS_POLICY_READERDATALIFECYCLE:
-        ELEM_CLOSE_QOS_POLICY(READERDATALIFECYCLE, "Reader Data Life-cycle");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_RELIABILITY:
-        ELEM_CLOSE_QOS_POLICY(RELIABILITY, "Reliability");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_RELIABILITY_MAX_BLOCKING_TIME:
-        ELEM_CLOSE_QOS_DURATION_PROPERTY(RELIABILITY, MAX_BLOCKING_TIME, max_blocking_time);
-        break;
-      case ELEMENT_KIND_QOS_POLICY_RESOURCELIMITS:
-        ELEM_CLOSE_QOS_POLICY(RESOURCELIMITS, "Resource Limits");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_TIMEBASEDFILTER_MINIMUM_SEPARATION:
-        ELEM_CLOSE_QOS_DURATION_PROPERTY(TIMEBASEDFILTER, MINIMUM_SEPARATION, minimum_separation);
-        break;
-      case ELEMENT_KIND_QOS_POLICY_TIMEBASEDFILTER:
-        ELEM_CLOSE_QOS_POLICY(TIMEBASEDFILTER, "Time-based Filter");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_TRANSPORTPRIORITY:
-        ELEM_CLOSE_QOS_POLICY(TRANSPORTPRIORITY, "Transport Priority");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_TRANSPORTPRIORITY_VALUE:
-        break;
-      case ELEMENT_KIND_QOS_POLICY_USERDATA:
-        ELEM_CLOSE_QOS_POLICY_DATA(USERDATA, "User Data");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_TOPICDATA:
-        ELEM_CLOSE_QOS_POLICY_DATA(TOPICDATA, "Topic Data");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_GROUPDATA:
-        ELEM_CLOSE_QOS_POLICY_DATA(GROUPDATA, "Group Data");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_USERDATA_VALUE:
-        ELEM_CLOSE_QOS_POLICY_DATA_VALUE(USERDATA, "User Data value");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_TOPICDATA_VALUE:
-        ELEM_CLOSE_QOS_POLICY_DATA_VALUE(TOPICDATA, "Topic Data value");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_GROUPDATA_VALUE:
-        ELEM_CLOSE_QOS_POLICY_DATA_VALUE(GROUPDATA, "Group Data value");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_WRITERDATALIFECYCLE:
-        ELEM_CLOSE_QOS_POLICY(WRITERDATALIFECYCLE, "Writer Data Life-cycle");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_WRITERBATCHING:
-        ELEM_CLOSE_QOS_POLICY(WRITERBATCHING, "Writer Batching");
-        break;
-      case ELEMENT_KIND_QOS_POLICY_ENTITYFACTORY:
-        ELEM_CLOSE_QOS_POLICY(ENTITYFACTORY, "Entity factory");
-        break;
-      case ELEMENT_KIND_DEPLOYMENT_CONF_TSN_TALKER_TRAFFIC_SPEC_PERIODICITY: {
-        struct dds_sysdef_tsn_traffic_specification *t = (struct dds_sysdef_tsn_traffic_specification *) pstate->current->parent;
-        struct dds_sysdef_qos_duration_property *d = (struct dds_sysdef_qos_duration_property *) pstate->current;
-        t->periodicity = DDS_SECS (d->sec) + d->nsec;
-        break;
-      }
-      case ELEMENT_KIND_TYPE_REF_EXTERNAL:
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_type, "name", name);
-        break;
-      case ELEMENT_KIND_QOS_LIB:
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_qos_lib, "name", name);
-        break;
-      case ELEMENT_KIND_QOS_PROFILE:
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_qos_profile, "name", name);
-        break;
-      case ELEMENT_KIND_DOMAIN_LIB:
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_domain_lib, "name", name);
-        break;
-      case ELEMENT_KIND_DOMAIN:
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_domain, "name", name);
-        ELEM_CLOSE_REQUIRE_ATTR_POPULATED (dds_sysdef_domain, "domain", SYSDEF_DOMAIN_PARAMS);
-        break;
-      case ELEMENT_KIND_PARTICIPANT:
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_participant, "name", name);
-        break;
-      case ELEMENT_KIND_REGISTER_TYPE:
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_register_type, "name", name);
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_register_type, "type_ref", type_ref);
-        break;
-      case ELEMENT_KIND_PARTICIPANT_LIB:
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_participant, "name", name);
-        break;
-      case ELEMENT_KIND_TOPIC:
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_topic, "name", name);
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_topic, "register_type_ref", register_type_ref);
-        break;
-      case ELEMENT_KIND_PUBLISHER:
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_publisher, "name", name);
-        break;
-      case ELEMENT_KIND_SUBSCRIBER:
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_subscriber, "name", name);
-        break;
-      case ELEMENT_KIND_WRITER:
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_writer, "name", name);
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_writer, "topic_ref", topic);
-        break;
-      case ELEMENT_KIND_READER:
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_reader, "name", name);
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_reader, "topic_ref", topic);
-        break;
-      case ELEMENT_KIND_APPLICATION_LIB:
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_application_lib, "name", name);
-        break;
-      case ELEMENT_KIND_APPLICATION:
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_application, "name", name);
-        break;
-      case ELEMENT_KIND_DEPLOYMENT_NODE_REF:
-        ELEM_CLOSE_REQUIRE_ATTR_PARENT (dds_sysdef_deployment, "node_ref", node);
-        break;
-      case ELEMENT_KIND_DEPLOYMENT_APPLICATION_REF:
-        ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_application_ref, "application_ref", application);
-        break;
-      default:
-        if (pstate->current->handle_close)
-        {
-          PARSER_ERROR (pstate, line, "Close element not handled");
-          ret = SD_PARSE_RESULT_ERR;
-        }
-        break;
+    case ELEMENT_KIND_QOS_POLICY_DEADLINE:
+      ELEM_CLOSE_QOS_POLICY(DEADLINE, "Deadline");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_DEADLINE_PERIOD:
+      ELEM_CLOSE_QOS_DURATION_PROPERTY(DEADLINE, PERIOD, deadline);
+      break;
+    case ELEMENT_KIND_QOS_POLICY_DESTINATIONORDER:
+      ELEM_CLOSE_QOS_POLICY(DESTINATIONORDER, "Destination Order");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_DURABILITY:
+      ELEM_CLOSE_QOS_POLICY(DURABILITY, "Durability");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_DURABILITYSERVICE: {
+      struct dds_sysdef_QOS_POLICY_DURABILITYSERVICE *tmp_qp = (struct dds_sysdef_QOS_POLICY_DURABILITYSERVICE *) pstate->current;
+      if ((tmp_qp->populated & QOS_POLICY_DURABILITYSERVICE_PARAM_HISTORY_KIND) && tmp_qp->values.history.kind == DDS_HISTORY_KEEP_ALL)
+        tmp_qp->populated |= QOS_POLICY_DURABILITYSERVICE_PARAM_HISTORY_DEPTH;
+      ELEM_CLOSE_QOS_POLICY(DURABILITYSERVICE, "Durability Service");
+      break;
     }
+    case ELEMENT_KIND_QOS_POLICY_DURABILITYSERVICE_SERVICE_CLEANUP_DELAY:
+      ELEM_CLOSE_QOS_DURATION_PROPERTY(DURABILITYSERVICE, SERVICE_CLEANUP_DELAY, service_cleanup_delay);
+      break;
+    case ELEMENT_KIND_QOS_POLICY_HISTORY: {
+      struct dds_sysdef_QOS_POLICY_HISTORY *tmp_qp = (struct dds_sysdef_QOS_POLICY_HISTORY *) pstate->current;
+      if ((tmp_qp->populated & QOS_POLICY_HISTORY_PARAM_KIND) && tmp_qp->values.kind == DDS_HISTORY_KEEP_ALL)
+        tmp_qp->populated |= QOS_POLICY_HISTORY_PARAM_DEPTH;
+      ELEM_CLOSE_QOS_POLICY(HISTORY, "History");
+      break;
+    }
+    case ELEMENT_KIND_QOS_POLICY_LATENCYBUDGET:
+      ELEM_CLOSE_QOS_POLICY(LATENCYBUDGET, "Latency Budget");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_LATENCYBUDGET_DURATION:
+      ELEM_CLOSE_QOS_DURATION_PROPERTY(LATENCYBUDGET, DURATION, duration);
+      break;
+    case ELEMENT_KIND_QOS_POLICY_LIFESPAN:
+      ELEM_CLOSE_QOS_POLICY(LIFESPAN, "Lifespan");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_LIFESPAN_DURATION:
+      ELEM_CLOSE_QOS_DURATION_PROPERTY(LIFESPAN, DURATION, duration);
+      break;
+    case ELEMENT_KIND_QOS_POLICY_LIVELINESS:
+      ELEM_CLOSE_QOS_POLICY(LIVELINESS, "Liveliness");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_LIVELINESS_LEASE_DURATION:
+      ELEM_CLOSE_QOS_DURATION_PROPERTY(LIVELINESS, LEASE_DURATION, lease_duration);
+      break;
+    case ELEMENT_KIND_QOS_POLICY_OWNERSHIP:
+      ELEM_CLOSE_QOS_POLICY(OWNERSHIP, "Ownership");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_OWNERSHIPSTRENGTH:
+      ELEM_CLOSE_QOS_POLICY(OWNERSHIPSTRENGTH, "Ownership Strength");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_OWNERSHIPSTRENGTH_VALUE:
+      break;
+    case ELEMENT_KIND_QOS_POLICY_PARTITION:
+      ELEM_CLOSE_QOS_POLICY(PARTITION, "Partition");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_TYPECONSISTENCYENFORCEMENT:
+      ELEM_CLOSE_QOS_POLICY(TYPECONSISTENCYENFORCEMENT, "Type consistency");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_DATAREPRESENTATION:
+      ELEM_CLOSE_QOS_POLICY(DATAREPRESENTATION, "Data representation");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_PRESENTATION:
+      ELEM_CLOSE_QOS_POLICY(PRESENTATION, "Presentation");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_READERDATALIFECYCLE_AUTOPURGE_NOWRITER_SAMPLES_DELAY:
+      ELEM_CLOSE_QOS_DURATION_PROPERTY(READERDATALIFECYCLE, AUTOPURGE_NOWRITER_SAMPLES_DELAY, autopurge_nowriter_samples_delay);
+      break;
+    case ELEMENT_KIND_QOS_POLICY_READERDATALIFECYCLE_AUTOPURGE_DISPOSED_SAMPLES_DELAY:
+      ELEM_CLOSE_QOS_DURATION_PROPERTY(READERDATALIFECYCLE, AUTOPURGE_DISPOSED_SAMPLES_DELAY, autopurge_disposed_samples_delay);
+      break;
+    case ELEMENT_KIND_QOS_POLICY_READERDATALIFECYCLE:
+      ELEM_CLOSE_QOS_POLICY(READERDATALIFECYCLE, "Reader Data Life-cycle");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_RELIABILITY:
+      ELEM_CLOSE_QOS_POLICY(RELIABILITY, "Reliability");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_RELIABILITY_MAX_BLOCKING_TIME:
+      ELEM_CLOSE_QOS_DURATION_PROPERTY(RELIABILITY, MAX_BLOCKING_TIME, max_blocking_time);
+      break;
+    case ELEMENT_KIND_QOS_POLICY_RESOURCELIMITS:
+      ELEM_CLOSE_QOS_POLICY(RESOURCELIMITS, "Resource Limits");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_TIMEBASEDFILTER_MINIMUM_SEPARATION:
+      ELEM_CLOSE_QOS_DURATION_PROPERTY(TIMEBASEDFILTER, MINIMUM_SEPARATION, minimum_separation);
+      break;
+    case ELEMENT_KIND_QOS_POLICY_TIMEBASEDFILTER:
+      ELEM_CLOSE_QOS_POLICY(TIMEBASEDFILTER, "Time-based Filter");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_TRANSPORTPRIORITY:
+      ELEM_CLOSE_QOS_POLICY(TRANSPORTPRIORITY, "Transport Priority");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_TRANSPORTPRIORITY_VALUE:
+      break;
+    case ELEMENT_KIND_QOS_POLICY_USERDATA:
+      ELEM_CLOSE_QOS_POLICY_DATA(USERDATA, "User Data");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_TOPICDATA:
+      ELEM_CLOSE_QOS_POLICY_DATA(TOPICDATA, "Topic Data");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_GROUPDATA:
+      ELEM_CLOSE_QOS_POLICY_DATA(GROUPDATA, "Group Data");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_USERDATA_VALUE:
+      ELEM_CLOSE_QOS_POLICY_DATA_VALUE(USERDATA, "User Data value");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_TOPICDATA_VALUE:
+      ELEM_CLOSE_QOS_POLICY_DATA_VALUE(TOPICDATA, "Topic Data value");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_GROUPDATA_VALUE:
+      ELEM_CLOSE_QOS_POLICY_DATA_VALUE(GROUPDATA, "Group Data value");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_WRITERDATALIFECYCLE:
+      ELEM_CLOSE_QOS_POLICY(WRITERDATALIFECYCLE, "Writer Data Life-cycle");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_WRITERBATCHING:
+      ELEM_CLOSE_QOS_POLICY(WRITERBATCHING, "Writer Batching");
+      break;
+    case ELEMENT_KIND_QOS_POLICY_ENTITYFACTORY:
+      ELEM_CLOSE_QOS_POLICY(ENTITYFACTORY, "Entity factory");
+      break;
+    case ELEMENT_KIND_DEPLOYMENT_CONF_TSN_TALKER_TRAFFIC_SPEC_PERIODICITY: {
+      struct dds_sysdef_tsn_traffic_specification *t = (struct dds_sysdef_tsn_traffic_specification *) pstate->current->parent;
+      struct dds_sysdef_qos_duration_property *d = (struct dds_sysdef_qos_duration_property *) pstate->current;
+      t->periodicity = DDS_SECS (d->sec) + d->nsec;
+      break;
+    }
+    case ELEMENT_KIND_TYPE_REF_EXTERNAL:
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_type, "name", name);
+      break;
+    case ELEMENT_KIND_QOS_LIB:
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_qos_lib, "name", name);
+      break;
+    case ELEMENT_KIND_QOS_PROFILE:
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_qos_profile, "name", name);
+      break;
+    case ELEMENT_KIND_DOMAIN_LIB:
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_domain_lib, "name", name);
+      break;
+    case ELEMENT_KIND_DOMAIN:
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_domain, "name", name);
+      ELEM_CLOSE_REQUIRE_ATTR_POPULATED (dds_sysdef_domain, "domain", SYSDEF_DOMAIN_PARAMS);
+      break;
+    case ELEMENT_KIND_PARTICIPANT:
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_participant, "name", name);
+      break;
+    case ELEMENT_KIND_REGISTER_TYPE:
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_register_type, "name", name);
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_register_type, "type_ref", type_ref);
+      break;
+    case ELEMENT_KIND_PARTICIPANT_LIB:
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_participant, "name", name);
+      break;
+    case ELEMENT_KIND_TOPIC:
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_topic, "name", name);
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_topic, "register_type_ref", register_type_ref);
+      break;
+    case ELEMENT_KIND_PUBLISHER:
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_publisher, "name", name);
+      break;
+    case ELEMENT_KIND_SUBSCRIBER:
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_subscriber, "name", name);
+      break;
+    case ELEMENT_KIND_WRITER:
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_writer, "name", name);
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_writer, "topic_ref", topic);
+      break;
+    case ELEMENT_KIND_READER:
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_reader, "name", name);
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_reader, "topic_ref", topic);
+      break;
+    case ELEMENT_KIND_APPLICATION_LIB:
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_application_lib, "name", name);
+      break;
+    case ELEMENT_KIND_APPLICATION:
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_application, "name", name);
+      break;
+    case ELEMENT_KIND_DEPLOYMENT_NODE_REF:
+      ELEM_CLOSE_REQUIRE_ATTR_PARENT (dds_sysdef_deployment, "node_ref", node);
+      break;
+    case ELEMENT_KIND_DEPLOYMENT_APPLICATION_REF:
+      ELEM_CLOSE_REQUIRE_ATTR (dds_sysdef_application_ref, "application_ref", application);
+      break;
+    default:
+      if (pstate->current->handle_close)
+      {
+        PARSER_ERROR (pstate, line, "Close element not handled");
+        ret = SD_PARSE_RESULT_ERR;
+      }
+      break;
   }
 
   struct xml_element *parent = pstate->current->parent;
@@ -1858,10 +1897,13 @@ static uint32_t b64_decode (const unsigned char *text, const uint32_t sz, unsign
   for (size_t i = 0, j = 0; i < sz && j < buff_len; i+=4, j+=3)
   {
     unsigned char chunk[3] = {0x00, 0x00, 0x00};
-    uint32_t tmp = (uint32_t)(base64_dtable[text[i]] << 0x06U) | base64_dtable[text[i+1]];
+    const unsigned char c1 = (i + 1 < sz) ? text[i+1] : (unsigned char) 0;
+    const unsigned char c2 = (i + 2 < sz) ? text[i+2] : (unsigned char) 0;
+    const unsigned char c3 = (i + 3 < sz) ? text[i+3] : (unsigned char) 0;
+    uint32_t tmp = (uint32_t)(base64_dtable[text[i]] << 0x06U) | base64_dtable[c1];
     uint32_t safe = tmp & 0x0FU;
     chunk[0] = (unsigned char)(tmp >> 0x04U);
-    tmp = (safe << 0x0CU) | ((uint32_t)(base64_dtable[text[i+2]] << 0x06U) | base64_dtable[text[i+3]]);
+    tmp = (safe << 0x0CU) | ((uint32_t)(base64_dtable[c2] << 0x06U) | base64_dtable[c3]);
     chunk[2] = (unsigned char)(tmp & 0xFFU);
     chunk[1] = (unsigned char)(tmp >> 0x08U);
     size_t cp_sz = (buff_len - j) < 3? buff_len - j: 3;
@@ -2326,18 +2368,8 @@ static int proc_elem_data (void *varg, UNUSED_ARG (uintptr_t eleminfo), const ch
     case ELEMENT_KIND_QOS_POLICY_PARTITION_NAME_ELEMENT: {
       struct dds_sysdef_QOS_POLICY_PARTITION *qp = (struct dds_sysdef_QOS_POLICY_PARTITION *) pstate->current->parent->parent;
       struct dds_sysdef_QOS_POLICY_PARTITION_NAME_ELEMENT *p = (struct dds_sysdef_QOS_POLICY_PARTITION_NAME_ELEMENT *) pstate->current;
-      if (dds_sysdef_is_valid_identifier (value))
-      {
-        p->element = ddsrt_strdup (value);
-        qp->populated = true;
-      }
-      else
-      {
-        // free_node (qp);
-        // pstate->current = NULL;
-        PARSER_ERROR (pstate, line, "Invalid partition name '%s'", value);
-        ret = SD_PARSE_RESULT_SYNTAX_ERR;
-      }
+      p->element = ddsrt_strdup (value);
+      qp->populated = true;
       break;
     }
     case ELEMENT_KIND_QOS_POLICY_DATAREPRESENTATION_ID_ELEMENT:
@@ -2562,7 +2594,7 @@ static int proc_elem_open (void *varg, UNUSED_ARG (uintptr_t parentinfo), UNUSED
       PARSER_ERROR (pstate, line, "Nested element '%s' not supported", name);
       ret = SD_PARSE_RESULT_SYNTAX_ERR;
     }
-    else if ((pstate->current = new_node (pstate, ELEMENT_KIND_DDS, ELEMENT_DATA_TYPE_GENERIC, NULL, sizeof(struct dds_sysdef_system), NO_INIT, fini_sysdef)) == NULL)
+    else if ((pstate->current = new_node (pstate, ELEMENT_KIND_DDS, ELEMENT_DATA_TYPE_GENERIC, NULL, sizeof(struct dds_sysdef_system), NULL, fini_sysdef)) == NULL)
     {
       PARSER_ERROR (pstate, line, "Error creating root node");
       ret = SD_PARSE_RESULT_ERR;
@@ -3111,6 +3143,11 @@ static dds_return_t sysdef_parse(struct ddsrt_xmlp_state *xmlps, struct parse_sy
     ret = DDS_RETCODE_ERROR;
     if (pstate->sysdef != NULL)
       dds_sysdef_fini_sysdef (pstate->sysdef);
+  }
+  else if (pstate->sysdef == NULL)
+  {
+    SYSDEF_ERROR ("No system definition root element found\n");
+    ret = DDS_RETCODE_ERROR;
   }
   else
   {

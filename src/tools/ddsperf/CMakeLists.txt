@@ -11,7 +11,7 @@
 #
 
 if (BUILD_DDSPERF)
-  include(Generate)
+  include("${CycloneDDS_IDLC_GENERATE_CMAKE}")
 
   idlc_generate(TARGET ddsperf_types FILES ddsperf_types.idl WARNINGS no-implicit-extensibility)
   add_executable(ddsperf
@@ -21,7 +21,7 @@ if (BUILD_DDSPERF)
     async_listener.c async_listener.h)
   target_link_libraries(ddsperf ddsperf_types ddsc compat)
 
-  if(WIN32)
+  if(WIN32 OR RTX64)
     target_compile_definitions(ddsperf PRIVATE _CRT_SECURE_NO_WARNINGS)
   endif()
 

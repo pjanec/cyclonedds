@@ -95,7 +95,9 @@ static int64_t dds_time_uniq (void)
 static struct ddsi_serdata *mksample (int32_t keyval, unsigned statusinfo)
 {
   RhcTypes_T d = { keyval, "A", (int32_t) ++seq, 0, "B" };
-  struct ddsi_serdata *sd = ddsi_serdata_from_sample (mdtype, SDK_DATA, &d);
+  struct ddsi_serdata *sd;
+  if (ddsi_serdata_from_sample_err (&sd, mdtype, SDK_DATA, &d) != DDS_RETCODE_OK)
+    return NULL;
   sd->statusinfo = statusinfo;
   sd->timestamp.v = dds_time_uniq ();
   return sd;
@@ -104,7 +106,9 @@ static struct ddsi_serdata *mksample (int32_t keyval, unsigned statusinfo)
 static struct ddsi_serdata *mkkeysample (int32_t keyval, unsigned statusinfo)
 {
   RhcTypes_T d = { keyval, "A", 0, 0, "B" };
-  struct ddsi_serdata *sd = ddsi_serdata_from_sample (mdtype, SDK_KEY, &d);
+  struct ddsi_serdata *sd;
+  if (ddsi_serdata_from_sample_err (&sd, mdtype, SDK_KEY, &d) != DDS_RETCODE_OK)
+    return NULL;
   sd->statusinfo = statusinfo;
   sd->timestamp.v = dds_time_uniq ();
   return sd;
@@ -203,7 +207,7 @@ _Pragma("GCC diagnostic pop")
 #endif
 }
 
-static struct dds_rhc *mkrhc (struct ddsi_domaingv *gv, dds_reader *rd, dds_history_kind_t hk, int32_t hdepth, dds_destination_order_kind_t dok)
+static struct dds_rhc *mkrhc (struct ddsi_domaingv *gv, dds_history_kind_t hk, int32_t hdepth, dds_destination_order_kind_t dok)
 {
   struct dds_rhc *rhc;
   dds_qos_t rqos;
@@ -214,8 +218,7 @@ static struct dds_rhc *mkrhc (struct ddsi_domaingv *gv, dds_reader *rd, dds_hist
   rqos.destination_order.kind = dok;
   ddsi_xqos_mergein_missing (&rqos, &ddsi_default_qos_reader, ~(uint64_t)0);
   ddsi_thread_state_awake_domain_ok (ddsi_lookup_thread_state ());
-  rhc = dds_rhc_default_new_xchecks (rd, gv, mdtype, true);
-  dds_rhc_set_qos(rhc, &rqos);
+  rhc = dds_rhc_default_new_xchecks (gv, mdtype, &rqos, true);
   ddsi_thread_state_asleep (ddsi_lookup_thread_state ());
   ddsi_xqos_fini (&rqos);
   return rhc;
@@ -334,7 +337,7 @@ static void rdtkcond (struct dds_rhc *rhc, dds_readcond *cond, const struct chec
   ddsi_thread_state_awake_domain_ok (ddsi_lookup_thread_state ());
   struct dds_read_collect_sample_arg arg;
   dds_read_collect_sample_arg_init (&arg, rres_ptrs, rres_iseq, NULL, NULL);
-  cnt = op (rhc, (max <= 0) ? (int32_t) (sizeof (rres_iseq) / sizeof (rres_iseq[0])) : max, cond ? DDS_RHC_NO_STATE_MASK_SET : (DDS_ANY_SAMPLE_STATE | DDS_ANY_VIEW_STATE | DDS_ANY_INSTANCE_STATE), 0, cond, dds_read_collect_sample, &arg);
+  cnt = op (rhc, (max <= 0) ? (int32_t) (sizeof (rres_iseq) / sizeof (rres_iseq[0])) : max, cond ? DDS_RHC_NO_STATE_MASK_SET : (DDS_ANY_SAMPLE_STATE | DDS_ANY_VIEW_STATE | DDS_ANY_INSTANCE_STATE), 0, cond, dds_read_collect_sample, &arg, false);
   ddsi_thread_state_asleep (ddsi_lookup_thread_state ());
   if (max > 0 && cnt > max) {
     printf ("%s TOO MUCH DATA (%d > %d)\n", opname, cnt, max);
@@ -1005,7 +1008,7 @@ int main (int argc, char **argv)
     struct ddsi_domaingv *gv = get_gv (pp);
     struct ddsi_tkmap *tkmap = gv->m_tkmap;
     printf ("%"PRId64" ************* 0 *************\n", dds_time ());
-    struct dds_rhc *rhc = mkrhc (gv, NULL, DDS_HISTORY_KEEP_LAST, 1, DDS_DESTINATIONORDER_BY_SOURCE_TIMESTAMP);
+    struct dds_rhc *rhc = mkrhc (gv, DDS_HISTORY_KEEP_LAST, 1, DDS_DESTINATIONORDER_BY_SOURCE_TIMESTAMP);
     struct ddsi_proxy_writer *wr0 = mkwr (1);
     struct ddsi_proxy_writer *wr1 = mkwr (1);
     uint64_t iid0, iid1, iid_t;
@@ -1079,7 +1082,7 @@ int main (int argc, char **argv)
     struct ddsi_domaingv *gv = get_gv (pp);
     struct ddsi_tkmap *tkmap = gv->m_tkmap;
     printf ("%"PRId64" ************* 1 *************\n", dds_time ());
-    struct dds_rhc *rhc = mkrhc (gv, NULL, DDS_HISTORY_KEEP_LAST, 4, DDS_DESTINATIONORDER_BY_SOURCE_TIMESTAMP);
+    struct dds_rhc *rhc = mkrhc (gv, DDS_HISTORY_KEEP_LAST, 4, DDS_DESTINATIONORDER_BY_SOURCE_TIMESTAMP);
     struct ddsi_proxy_writer *wr[] = { mkwr (0), mkwr (0), mkwr (0) };
     uint64_t iid0, iid_t;
     int nregs = 3, isreg[] = { 1, 1, 1 };

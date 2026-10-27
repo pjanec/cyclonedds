@@ -26,8 +26,8 @@ struct dds_readcond;
 struct dds_reader;
 struct ddsi_tkmap;
 
-typedef dds_return_t (*dds_rhc_associate_t) (struct dds_rhc *rhc, struct dds_reader *reader, const struct ddsi_sertype *type, struct ddsi_tkmap *tkmap);
-typedef int32_t (*dds_rhc_read_take_t) (struct dds_rhc *rhc, int32_t max_samples, uint32_t mask, dds_instance_handle_t handle, struct dds_readcond *cond, dds_read_with_collector_fn_t collect_sample, void *collect_sample_arg);
+typedef dds_return_t (*dds_rhc_associate_t) (struct dds_rhc *rhc, struct dds_reader *reader);
+typedef int32_t (*dds_rhc_read_take_t) (struct dds_rhc *rhc, int32_t max_samples, uint32_t mask, dds_instance_handle_t handle, struct dds_readcond *cond, dds_read_with_collector_fn_t collect_sample, void *collect_sample_arg, bool next_instance);
 
 typedef bool (*dds_rhc_add_readcondition_t) (struct dds_rhc *rhc, struct dds_readcond *cond);
 typedef void (*dds_rhc_remove_readcondition_t) (struct dds_rhc *rhc, struct dds_readcond *cond);
@@ -54,8 +54,8 @@ struct dds_rhc {
 DDSRT_STATIC_ASSERT (offsetof (struct dds_rhc, common.ops) == offsetof (struct ddsi_rhc, ops));
 
 /** @component rhc */
-DDS_INLINE_EXPORT inline dds_return_t dds_rhc_associate (struct dds_rhc *rhc, struct dds_reader *reader, const struct ddsi_sertype *type, struct ddsi_tkmap *tkmap) {
-  return rhc->common.ops->associate (rhc, reader, type, tkmap);
+DDS_INLINE_EXPORT inline dds_return_t dds_rhc_associate (struct dds_rhc *rhc, struct dds_reader *reader) {
+  return rhc->common.ops->associate (rhc, reader);
 }
 
 /** @component rhc */
@@ -74,28 +74,23 @@ DDS_INLINE_EXPORT inline void dds_rhc_relinquish_ownership (struct dds_rhc *rhc,
 }
 
 /** @component rhc */
-DDS_INLINE_EXPORT inline void dds_rhc_set_qos (struct dds_rhc *rhc, const struct dds_qos *qos) {
-  rhc->common.ops->rhc_ops.set_qos (&rhc->common.rhc, qos);
-}
-
-/** @component rhc */
 DDS_INLINE_EXPORT inline void dds_rhc_free (struct dds_rhc *rhc) {
   rhc->common.ops->rhc_ops.free (&rhc->common.rhc);
 }
 
 /** @component rhc */
-DDS_INLINE_EXPORT inline int32_t dds_rhc_peek (struct dds_rhc *rhc, int32_t max_samples, uint32_t mask, dds_instance_handle_t handle, struct dds_readcond *cond, dds_read_with_collector_fn_t collect_sample, void *collect_sample_arg) {
-  return (rhc->common.ops->peek) (rhc, max_samples, mask, handle, cond, collect_sample, collect_sample_arg);
+DDS_INLINE_EXPORT inline int32_t dds_rhc_peek (struct dds_rhc *rhc, int32_t max_samples, uint32_t mask, dds_instance_handle_t handle, struct dds_readcond *cond, dds_read_with_collector_fn_t collect_sample, void *collect_sample_arg, bool next_instance) {
+  return (rhc->common.ops->peek) (rhc, max_samples, mask, handle, cond, collect_sample, collect_sample_arg, next_instance);
 }
 
 /** @component rhc */
-DDS_INLINE_EXPORT inline int32_t dds_rhc_read (struct dds_rhc *rhc, int32_t max_samples, uint32_t mask, dds_instance_handle_t handle, struct dds_readcond *cond, dds_read_with_collector_fn_t collect_sample, void *collect_sample_arg) {
-  return (rhc->common.ops->read) (rhc, max_samples, mask, handle, cond, collect_sample, collect_sample_arg);
+DDS_INLINE_EXPORT inline int32_t dds_rhc_read (struct dds_rhc *rhc, int32_t max_samples, uint32_t mask, dds_instance_handle_t handle, struct dds_readcond *cond, dds_read_with_collector_fn_t collect_sample, void *collect_sample_arg, bool next_instance) {
+  return (rhc->common.ops->read) (rhc, max_samples, mask, handle, cond, collect_sample, collect_sample_arg, next_instance);
 }
 
 /** @component rhc */
-DDS_INLINE_EXPORT inline int32_t dds_rhc_take (struct dds_rhc *rhc, int32_t max_samples, uint32_t mask, dds_instance_handle_t handle, struct dds_readcond *cond, dds_read_with_collector_fn_t collect_sample, void *collect_sample_arg) {
-  return rhc->common.ops->take (rhc, max_samples, mask, handle, cond, collect_sample, collect_sample_arg);
+DDS_INLINE_EXPORT inline int32_t dds_rhc_take (struct dds_rhc *rhc, int32_t max_samples, uint32_t mask, dds_instance_handle_t handle, struct dds_readcond *cond, dds_read_with_collector_fn_t collect_sample, void *collect_sample_arg, bool next_instance) {
+  return rhc->common.ops->take (rhc, max_samples, mask, handle, cond, collect_sample, collect_sample_arg, next_instance);
 }
 
 /** @component rhc */

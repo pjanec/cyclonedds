@@ -44,9 +44,21 @@ The default value is: ``any``
 //CycloneDDS/Domain/Compatibility
 =================================
 
-Children: :ref:`AllowInvalidTryConstruct<//CycloneDDS/Domain/Compatibility/AllowInvalidTryConstruct>`, :ref:`AssumeRtiHasPmdEndpoints<//CycloneDDS/Domain/Compatibility/AssumeRtiHasPmdEndpoints>`, :ref:`ExplicitlyPublishQosSetToDefault<//CycloneDDS/Domain/Compatibility/ExplicitlyPublishQosSetToDefault>`, :ref:`IgnoreTypeInformation<//CycloneDDS/Domain/Compatibility/IgnoreTypeInformation>`, :ref:`ManySocketsMode<//CycloneDDS/Domain/Compatibility/ManySocketsMode>`, :ref:`ProtocolVersion<//CycloneDDS/Domain/Compatibility/ProtocolVersion>`, :ref:`StandardsConformance<//CycloneDDS/Domain/Compatibility/StandardsConformance>`
+Children: :ref:`AllowInvalidExtensibility<//CycloneDDS/Domain/Compatibility/AllowInvalidExtensibility>`, :ref:`AllowInvalidTryConstruct<//CycloneDDS/Domain/Compatibility/AllowInvalidTryConstruct>`, :ref:`AllowMismatchingTypeId<//CycloneDDS/Domain/Compatibility/AllowMismatchingTypeId>`, :ref:`AllowRecursiveTypes<//CycloneDDS/Domain/Compatibility/AllowRecursiveTypes>`, :ref:`AssumeRtiHasPmdEndpoints<//CycloneDDS/Domain/Compatibility/AssumeRtiHasPmdEndpoints>`, :ref:`ExplicitlyPublishQosSetToDefault<//CycloneDDS/Domain/Compatibility/ExplicitlyPublishQosSetToDefault>`, :ref:`IgnoreTypeInformation<//CycloneDDS/Domain/Compatibility/IgnoreTypeInformation>`, :ref:`ManySocketsMode<//CycloneDDS/Domain/Compatibility/ManySocketsMode>`, :ref:`ProtocolVersion<//CycloneDDS/Domain/Compatibility/ProtocolVersion>`, :ref:`StandardsConformance<//CycloneDDS/Domain/Compatibility/StandardsConformance>`
 
 The Compatibility element allows you to specify various settings related to compatibility with standards and with other DDSI implementations.
+
+
+.. _`//CycloneDDS/Domain/Compatibility/AllowInvalidExtensibility`:
+
+//CycloneDDS/Domain/Compatibility/AllowInvalidExtensibility
+-----------------------------------------------------------
+
+Boolean
+
+Setting option makes the TypeObject validation code accept enum/bitmask types with the extensibility flags all set to 0 and treats it as APPENDABLE instead.
+
+The default value is: ``false``
 
 
 .. _`//CycloneDDS/Domain/Compatibility/AllowInvalidTryConstruct`:
@@ -59,6 +71,30 @@ Boolean
 Setting option makes the TypeObject validation code accept types with the two "try construct" bits both set to 0, which is explicitly noted as an invalid setting in the spec.
 
 The default value is: ``false``
+
+
+.. _`//CycloneDDS/Domain/Compatibility/AllowMismatchingTypeId`:
+
+//CycloneDDS/Domain/Compatibility/AllowMismatchingTypeId
+--------------------------------------------------------
+
+Boolean
+
+Setting option makes the type library accept a type id -> type objects entry even when the id doesn't match the object.
+
+The default value is: ``false``
+
+
+.. _`//CycloneDDS/Domain/Compatibility/AllowRecursiveTypes`:
+
+//CycloneDDS/Domain/Compatibility/AllowRecursiveTypes
+-----------------------------------------------------
+
+Boolean
+
+This option controls support for recursive XTypes. When disabled, TypeIdentifiers for strongly connected components and TypeObjects that contain recursive dependency cycles are rejected. This reduces the TypeLookup and type library attack surface at the cost of interoperability with applications that use recursive types.
+
+The default value is: ``true``
 
 
 .. _`//CycloneDDS/Domain/Compatibility/AssumeRtiHasPmdEndpoints`:
@@ -152,7 +188,7 @@ The default value is: ``lax``
 //CycloneDDS/Domain/Discovery
 =============================
 
-Children: :ref:`DSGracePeriod<//CycloneDDS/Domain/Discovery/DSGracePeriod>`, :ref:`DefaultMulticastAddress<//CycloneDDS/Domain/Discovery/DefaultMulticastAddress>`, :ref:`DiscoveredLocatorPruneDelay<//CycloneDDS/Domain/Discovery/DiscoveredLocatorPruneDelay>`, :ref:`EnableTopicDiscoveryEndpoints<//CycloneDDS/Domain/Discovery/EnableTopicDiscoveryEndpoints>`, :ref:`ExternalDomainId<//CycloneDDS/Domain/Discovery/ExternalDomainId>`, :ref:`InitialLocatorPruneDelay<//CycloneDDS/Domain/Discovery/InitialLocatorPruneDelay>`, :ref:`LeaseDuration<//CycloneDDS/Domain/Discovery/LeaseDuration>`, :ref:`MaxAutoParticipantIndex<//CycloneDDS/Domain/Discovery/MaxAutoParticipantIndex>`, :ref:`ParticipantIndex<//CycloneDDS/Domain/Discovery/ParticipantIndex>`, :ref:`Peers<//CycloneDDS/Domain/Discovery/Peers>`, :ref:`Ports<//CycloneDDS/Domain/Discovery/Ports>`, :ref:`SPDPInterval<//CycloneDDS/Domain/Discovery/SPDPInterval>`, :ref:`SPDPMulticastAddress<//CycloneDDS/Domain/Discovery/SPDPMulticastAddress>`, :ref:`Tag<//CycloneDDS/Domain/Discovery/Tag>`
+Children: :ref:`DSGracePeriod<//CycloneDDS/Domain/Discovery/DSGracePeriod>`, :ref:`DefaultMulticastAddress<//CycloneDDS/Domain/Discovery/DefaultMulticastAddress>`, :ref:`DiscoveredLocatorPruneDelay<//CycloneDDS/Domain/Discovery/DiscoveredLocatorPruneDelay>`, :ref:`EnableTopicDiscoveryEndpoints<//CycloneDDS/Domain/Discovery/EnableTopicDiscoveryEndpoints>`, :ref:`ExternalDomainId<//CycloneDDS/Domain/Discovery/ExternalDomainId>`, :ref:`InitialLocatorPruneDelay<//CycloneDDS/Domain/Discovery/InitialLocatorPruneDelay>`, :ref:`InterfaceFiltering<//CycloneDDS/Domain/Discovery/InterfaceFiltering>`, :ref:`LeaseDuration<//CycloneDDS/Domain/Discovery/LeaseDuration>`, :ref:`MaxAutoParticipantIndex<//CycloneDDS/Domain/Discovery/MaxAutoParticipantIndex>`, :ref:`ParticipantIndex<//CycloneDDS/Domain/Discovery/ParticipantIndex>`, :ref:`Peers<//CycloneDDS/Domain/Discovery/Peers>`, :ref:`Ports<//CycloneDDS/Domain/Discovery/Ports>`, :ref:`SPDPInterval<//CycloneDDS/Domain/Discovery/SPDPInterval>`, :ref:`SPDPMulticastAddress<//CycloneDDS/Domain/Discovery/SPDPMulticastAddress>`, :ref:`Tag<//CycloneDDS/Domain/Discovery/Tag>`
 
 The Discovery element allows you to specify various parameters related to the discovery of peers.
 
@@ -233,6 +269,27 @@ This element specifies the default time for configured peer locators are initial
 Valid values are finite durations with an explicit unit or the keyword 'inf' for infinity. Recognised units: ns, us, ms, s, min, hr, day.
 
 The default value is: ``30s``
+
+
+.. _`//CycloneDDS/Domain/Discovery/InterfaceFiltering`:
+
+//CycloneDDS/Domain/Discovery/InterfaceFiltering
+------------------------------------------------
+
+One of: off, strict, normal
+
+This element decides how strictly the participant discovery filters 
+on reception interface (requires extended packet info to be enabled, see 
+Internal/ExtendedPacketInfo:
+ * off: no filtering
+
+ * normal: only the configured interfaces and loopback
+
+ * strict: only the configured interfaces
+
+
+
+The default value is: ``normal``
 
 
 .. _`//CycloneDDS/Domain/Discovery/LeaseDuration`:
@@ -480,9 +537,91 @@ The default value is: ``<empty>``
 //CycloneDDS/Domain/General
 ===========================
 
-Children: :ref:`AllowMulticast<//CycloneDDS/Domain/General/AllowMulticast>`, :ref:`DontRoute<//CycloneDDS/Domain/General/DontRoute>`, :ref:`EnableMulticastLoopback<//CycloneDDS/Domain/General/EnableMulticastLoopback>`, :ref:`EntityAutoNaming<//CycloneDDS/Domain/General/EntityAutoNaming>`, :ref:`ExternalNetworkAddress<//CycloneDDS/Domain/General/ExternalNetworkAddress>`, :ref:`ExternalNetworkMask<//CycloneDDS/Domain/General/ExternalNetworkMask>`, :ref:`FragmentSize<//CycloneDDS/Domain/General/FragmentSize>`, :ref:`Interfaces<//CycloneDDS/Domain/General/Interfaces>`, :ref:`MaxMessageSize<//CycloneDDS/Domain/General/MaxMessageSize>`, :ref:`MaxRexmitMessageSize<//CycloneDDS/Domain/General/MaxRexmitMessageSize>`, :ref:`MulticastRecvNetworkInterfaceAddresses<//CycloneDDS/Domain/General/MulticastRecvNetworkInterfaceAddresses>`, :ref:`MulticastTimeToLive<//CycloneDDS/Domain/General/MulticastTimeToLive>`, :ref:`RedundantNetworking<//CycloneDDS/Domain/General/RedundantNetworking>`, :ref:`Transport<//CycloneDDS/Domain/General/Transport>`, :ref:`UseIPv6<//CycloneDDS/Domain/General/UseIPv6>`
+Children: :ref:`AddrsetCosts<//CycloneDDS/Domain/General/AddrsetCosts>`, :ref:`AllowMulticast<//CycloneDDS/Domain/General/AllowMulticast>`, :ref:`DontRoute<//CycloneDDS/Domain/General/DontRoute>`, :ref:`EnableMulticastLoopback<//CycloneDDS/Domain/General/EnableMulticastLoopback>`, :ref:`EntityAutoNaming<//CycloneDDS/Domain/General/EntityAutoNaming>`, :ref:`ExternalNetworkAddress<//CycloneDDS/Domain/General/ExternalNetworkAddress>`, :ref:`ExternalNetworkMask<//CycloneDDS/Domain/General/ExternalNetworkMask>`, :ref:`FragmentSize<//CycloneDDS/Domain/General/FragmentSize>`, :ref:`Interfaces<//CycloneDDS/Domain/General/Interfaces>`, :ref:`MaxMessageSize<//CycloneDDS/Domain/General/MaxMessageSize>`, :ref:`MaxRexmitMessageSize<//CycloneDDS/Domain/General/MaxRexmitMessageSize>`, :ref:`MulticastRecvNetworkInterfaceAddresses<//CycloneDDS/Domain/General/MulticastRecvNetworkInterfaceAddresses>`, :ref:`MulticastTimeToLive<//CycloneDDS/Domain/General/MulticastTimeToLive>`, :ref:`RedundantNetworking<//CycloneDDS/Domain/General/RedundantNetworking>`, :ref:`Transport<//CycloneDDS/Domain/General/Transport>`, :ref:`UseIPv6<//CycloneDDS/Domain/General/UseIPv6>`
 
 The General element specifies overall Cyclone DDS service settings.
+
+
+.. _`//CycloneDDS/Domain/General/AddrsetCosts`:
+
+//CycloneDDS/Domain/General/AddrsetCosts
+----------------------------------------
+
+Children: :ref:`delivered<//CycloneDDS/Domain/General/AddrsetCosts/delivered>`, :ref:`discarded<//CycloneDDS/Domain/General/AddrsetCosts/discarded>`, :ref:`mc<//CycloneDDS/Domain/General/AddrsetCosts/mc>`, :ref:`redundant_psmx<//CycloneDDS/Domain/General/AddrsetCosts/redundant_psmx>`, :ref:`ssm<//CycloneDDS/Domain/General/AddrsetCosts/ssm>`, :ref:`uc<//CycloneDDS/Domain/General/AddrsetCosts/uc>`
+
+This element specifies the "costs" used in deciding which set of addresses to use when sending data to readers. It is based on repeatedly selecting the lowest-cost locator from the available locators, where the cost is defined as -priority + {uc|mc|ssm} + delivered |READERS| + SUM(X) where "priority" is the network interface priority, and X is 0 for readers not yet reached, and (discarded-delivered) for readers already reached via a previously selected locator.
+
+
+.. _`//CycloneDDS/Domain/General/AddrsetCosts/delivered`:
+
+//CycloneDDS/Domain/General/AddrsetCosts/delivered
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Integer
+
+The "cost" associated with delivering to a reader. Typically negative to make delivering to more readers with a single message advantageous.
+
+The default value is: ``-1``
+
+
+.. _`//CycloneDDS/Domain/General/AddrsetCosts/discarded`:
+
+//CycloneDDS/Domain/General/AddrsetCosts/discarded
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Integer
+
+The "cost" of delivering another copy to a reader via a network interface. Typically positive to make delivering to the same reader twice more costly.
+
+The default value is: ``1``
+
+
+.. _`//CycloneDDS/Domain/General/AddrsetCosts/mc`:
+
+//CycloneDDS/Domain/General/AddrsetCosts/mc
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Integer
+
+The base "cost" of an (any-source) multicast.
+
+The default value is: ``3``
+
+
+.. _`//CycloneDDS/Domain/General/AddrsetCosts/redundant_psmx`:
+
+//CycloneDDS/Domain/General/AddrsetCosts/redundant_psmx
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Integer
+
+The "cost" of delivering another copy to a reader via a PSMX interface. The code still mostly assumes that delivering via PSMX is free (a remnant of its origins as a shared-memory bypass).
+
+The default value is: ``0``
+
+
+.. _`//CycloneDDS/Domain/General/AddrsetCosts/ssm`:
+
+//CycloneDDS/Domain/General/AddrsetCosts/ssm
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Integer
+
+The base "cost" of a source-specific multicast.
+
+The default value is: ``2``
+
+
+.. _`//CycloneDDS/Domain/General/AddrsetCosts/uc`:
+
+//CycloneDDS/Domain/General/AddrsetCosts/uc
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Integer
+
+The base "cost" of a unicast.
+
+The default value is: ``2``
 
 
 .. _`//CycloneDDS/Domain/General/AllowMulticast`:
@@ -616,6 +755,7 @@ This element specifies the network interfaces for use by Cyclone DDS. Multiple i
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Attributes: :ref:`address<//CycloneDDS/Domain/General/Interfaces/NetworkInterface[@address]>`, :ref:`allow_multicast<//CycloneDDS/Domain/General/Interfaces/NetworkInterface[@allow_multicast]>`, :ref:`autodetermine<//CycloneDDS/Domain/General/Interfaces/NetworkInterface[@autodetermine]>`, :ref:`multicast<//CycloneDDS/Domain/General/Interfaces/NetworkInterface[@multicast]>`, :ref:`name<//CycloneDDS/Domain/General/Interfaces/NetworkInterface[@name]>`, :ref:`prefer_multicast<//CycloneDDS/Domain/General/Interfaces/NetworkInterface[@prefer_multicast]>`, :ref:`presence_required<//CycloneDDS/Domain/General/Interfaces/NetworkInterface[@presence_required]>`, :ref:`priority<//CycloneDDS/Domain/General/Interfaces/NetworkInterface[@priority]>`
+Children: :ref:`AddrsetCosts<//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts>`
 
 This element defines a network interface. You can set autodetermine="true" to autoselect the interface CycloneDDS considers the highest quality. If autodetermine="false" (the default), you must specify the name and/or address attribute. If you specify both, they must match the same interface.
 
@@ -727,6 +867,88 @@ The default value is: ``true``
 Text
 
 This attribute specifies the interface priority (decimal integer or default). The default value for loopback interfaces is 2, for all other interfaces it is 0.
+
+The default value is: ``default``
+
+
+.. _`//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts`:
+
+//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+Children: :ref:`delivered<//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/delivered>`, :ref:`discarded<//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/discarded>`, :ref:`mc<//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/mc>`, :ref:`redundant_psmx<//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/redundant_psmx>`, :ref:`ssm<//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/ssm>`, :ref:`uc<//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/uc>`
+
+This element allows overriding the constants used in computing the address sets for a network interface. See General/AddrsetCosts for more information.
+
+
+.. _`//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/delivered`:
+
+//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/delivered
+______________________________________________________________________________
+
+Integer
+
+The "cost" associated with delivering to a reader. Typically negative to make delivering to more readers with a single message advantageous. If set to "default", taken from General/AddrsetCosts/delivered.
+
+The default value is: ``default``
+
+
+.. _`//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/discarded`:
+
+//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/discarded
+______________________________________________________________________________
+
+Integer
+
+The "cost" of delivering another copy to a reader via a network interface. Typically positive to make delivering to the same reader twice more costly. If set to "default", taken from General/AddrsetCosts/discarded.
+
+The default value is: ``default``
+
+
+.. _`//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/mc`:
+
+//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/mc
+_______________________________________________________________________
+
+Integer
+
+The base "cost" of an (any-source) multicast. If set to "default", taken from General/AddrsetCosts/mc unless "prefer\_multicast" is true, in which case it defaults to 2.
+
+The default value is: ``default``
+
+
+.. _`//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/redundant_psmx`:
+
+//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/redundant_psmx
+___________________________________________________________________________________
+
+Integer
+
+The "cost" of delivering another copy to a reader via a PSMX interface. The code still mostly assumes that delivering via PSMX is free (a remnant of its origins as a shared-memory bypass).If set to "default", taken from General/AddrsetCosts/redundant\_psmx.
+
+The default value is: ``default``
+
+
+.. _`//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/ssm`:
+
+//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/ssm
+________________________________________________________________________
+
+Integer
+
+The base "cost" of a source-specific multicast. If set to "default", taken from General/AddrsetCosts/ssm unless "prefer\_multicast" is true, in which case it defaults to 1.
+
+The default value is: ``default``
+
+
+.. _`//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/uc`:
+
+//CycloneDDS/Domain/General/Interfaces/NetworkInterface/AddrsetCosts/uc
+_______________________________________________________________________
+
+Integer
+
+The base "cost" of a unicast. If set to "default", taken from General/AddrsetCosts/uc unless "prefer\_multicast" is true, in which case it defaults to 1000000.
 
 The default value is: ``default``
 
@@ -876,9 +1098,9 @@ The default value is: ``false``
 //CycloneDDS/Domain/General/Transport
 -------------------------------------
 
-One of: default, udp, udp6, tcp, tcp6, raweth
+Text
 
-This element allows selecting the transport to be used (udp, udp6, tcp, tcp6, raweth)
+This element allows selecting the transport to be used (udp, udp6, tcp, tcp6, raweth, fakeudp). The fakeudp transport is available only when built with ENABLE\_FAKEUDP and uses a built-in deterministic fake network by default. It may also be written as fakeudp:file to load the fake network topology from an XML file, or as fakeudp:real to import the real interface list into the fake network.
 
 The default value is: ``default``
 
@@ -1084,9 +1306,9 @@ The default value is: ``<empty>``
 
 Boolean
 
-Whether to enable the IP\_PKTINFO on UDP sockets to get hold of the packet destination address and interface on which it was received. This allows for better filtering on discovery packets, but comes at a small performance penalty.
+Whether to enable the IP\_PKTINFO on UDP sockets to get hold of the packet destination address and interface on which it was received. This allows for better filtering on discovery packets, but comes at a small performance penalty. Enabled by default if supported.
 
-The default value is: ``true``
+The default value is: ``default``
 
 
 .. _`//CycloneDDS/Domain/Internal/GenerateKeyhash`:
@@ -2670,7 +2892,9 @@ The Tracing element controls the amount and type of information that is written 
 
 Boolean
 
-This option specifies whether the output should be appended to an existing log file. The default is to create a new log file each time, which is generally the best option if a detailed log is generated.
+This option specifies whether existing contents are preserved when this process first opens the output file. The default is to clear the file on first use. Subsequent domains using the same output filename always append, even after all earlier domains have been deleted. The first successful opener determines whether existing contents are preserved when domains specify different values for this option.
+
+Filenames are compared as absolute paths where supported, and otherwise as configured. Filesystem aliases are not detected. This history is retained until the runtime is unloaded or the process exits. This option has no effect on stdout or stderr.
 
 The default value is: ``false``
 
@@ -2721,6 +2945,8 @@ This element enables individual logging categories. These are enabled in additio
  * content: tracing of sample contents
 
  * malformed: dump malformed full packet as warning
+
+ * typelib: tracing of type library details
 
  * user: all user-defined tracing categories
 
@@ -2794,14 +3020,14 @@ The categorisation of tracing output is incomplete and hence most of the verbosi
 The default value is: ``none``
 
 ..
-   generated from ddsi_config.h[6b6cd6f2af797765bc3753758bdd5f166f64b418] 
-   generated from ddsi_config.c[a48ec3d818f2ad852949a7832951709c3488dc10] 
-   generated from ddsi__cfgelems.h[32ba43b085108475f0fc5041d4593a9926c0f6f9] 
-   generated from cfgunits.h[05f093223fce107d24dd157ebaafa351dc9df752] 
-   generated from _confgen.h[bb9a0fc6ef1f7f7c46790ee00132e340e5fff36d] 
-   generated from _confgen.c[0d833a6f2c98902f1249e63aed03a6164f0791d6] 
-   generated from generate_rnc.c[b50e4b7ab1d04b2bc1d361a0811247c337b74934] 
-   generated from generate_md.c[789b92e422631684352909cfb8bf43f6ceb16a01] 
-   generated from generate_rst.c[3c4b523fbb57c8e4a7e247379d06a8021ccc21c4] 
-   generated from generate_xsd.c[9bb91084fff7495aee9c025db3108549a0141957] 
-   generated from generate_defconfig.c[02afff6935d72b7f04dc64c8a649b09f9f6143ac] 
+   generated from ddsi_config.h[158c45a21ff482bdf9363c12efc5e5e96d0c9827]
+   generated from ddsi_config.c[7966a1299fb24d205f99f242ee09bf48824daadb]
+   generated from ddsi__cfgelems.h[3383bfd0af910c73f41bed190f7d377c98cc125c]
+   generated from cfgunits.h[05f093223fce107d24dd157ebaafa351dc9df752]
+   generated from _confgen.h[e0b7a072621df43c0e7419d52359ddf4b98b202f]
+   generated from _confgen.c[c08a605e3ac6161fd675369a295e7637e6d653ac]
+   generated from generate_rnc.c[b50e4b7ab1d04b2bc1d361a0811247c337b74934]
+   generated from generate_md.c[789b92e422631684352909cfb8bf43f6ceb16a01]
+   generated from generate_rst.c[3c4b523fbb57c8e4a7e247379d06a8021ccc21c4]
+   generated from generate_xsd.c[9bb91084fff7495aee9c025db3108549a0141957]
+   generated from generate_defconfig.c[ab6586fcd43cc01814507db687575914686943dc]

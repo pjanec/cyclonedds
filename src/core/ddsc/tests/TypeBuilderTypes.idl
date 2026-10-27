@@ -542,4 +542,393 @@ module TypeBuilderTypes {
     @optional @id(26) sequence<sequence<t49k> > f7;
   };
 
+  // try-construct
+  @final
+  enum en50f {
+    EN50F_1, EN50F_2, EN50F_3
+  };
+  @appendable
+  enum en50a {
+    EN50A_1, EN50A_2, EN50A_3
+  };
+  typedef sequence<en50a, 1> t50_1;
+  typedef sequence<@try_construct(USE_DEFAULT) en50a, 1> t50_2;
+  struct t50 {
+    en50f f1;
+    en50a f2;
+    /*@try_construct()*/ en50a f3;
+    @try_construct(USE_DEFAULT) en50a f4;
+    @try_construct(DISCARD) en50a f5;
+    t50_1 f6;
+    t50_2 f7;
+    sequence<en50a, 1> f8;
+    sequence<@try_construct(USE_DEFAULT) en50a, 1> f9;
+    /*@try_construct()*/ t50_1 f10;
+    @try_construct(TRIM) t50_1 f11;
+    @try_construct(TRIM) sequence<@try_construct(USE_DEFAULT) en50a, 1> f12;
+  };
+
+  typedef string<3> t51_1;
+  struct t51 {
+    t51_1 f1;
+    @try_construct(TRIM) t51_1 f2;
+    @try_construct(USE_DEFAULT) t51_1 f3;
+    sequence<t51_1, 1> f4;
+    @try_construct(TRIM) sequence<t51_1, 1> f5;
+    sequence<@try_construct(TRIM) t51_1, 1> f6;
+    sequence<@try_construct(USE_DEFAULT) t51_1, 1> f7;
+    @try_construct(TRIM) sequence<@try_construct(TRIM) t51_1, 1> f8;
+    @try_construct(TRIM) sequence<@try_construct(USE_DEFAULT) t51_1, 1> f9;
+  };
+
+  struct t52 {
+    @try_construct(TRIM) sequence<sequence<t51_1, 1>, 1> f1[2][2];
+    sequence<@try_construct(TRIM) sequence<t51_1, 1>, 1> f2[2][2];
+    @try_construct(TRIM) sequence<sequence<t51_1, 1>, 1> f3[2][2];
+    @try_construct(TRIM) sequence<@try_construct(TRIM) sequence<t51_1, 1>, 1> f4[2][2];
+    @try_construct(TRIM) sequence<sequence<@try_construct(TRIM) t51_1, 1>, 1> f5[2][2];
+    sequence<@try_construct(TRIM) sequence<@try_construct(TRIM) t51_1, 1>, 1> f6[2][2];
+    @try_construct(TRIM) sequence<sequence<@try_construct(TRIM) t51_1, 1>, 1> f7[2][2];
+    @try_construct(TRIM) sequence<@try_construct(TRIM) sequence<@try_construct(TRIM) t51_1, 1>, 1> f8[2][2];
+  };
+
+  // unions with 64-bit and bitmask discriminants (FIXME: only half-heartedly supported)
+  @nested @final union t53a switch (uint64) {
+    case 1: octet f1;
+    case 0x3456789a: string f2;
+  };
+  
+  @final struct t53 {
+    t53a f1;
+  };
+
+  @final bitmask t54a {
+    t54a_a, t54a_b, t54a_c
+  };
+  
+  @nested @final union t54b switch (t54a) {
+    case t54a_a: char f1;
+    case t54a_b | t54a_c: double f2;
+    case t54a_c: string f3;
+    default: octet f4;
+  };
+
+  @final struct t54 {
+    t54b f1;
+  };
+
+  // unions with signed integer discriminants and negative labels
+  @nested @final union t55a switch (int8) {
+    case -128: char f1;
+    case -1: short f2;
+    case 1: long f3;
+    case 127: float f4;
+  };
+
+  @nested @final union t55b switch (int16) {
+    case -32768: char f1;
+    case -1: short f2;
+    case 1: long f3;
+    case 32767: float f4;
+  };
+
+  @nested @final union t55c switch (int32) {
+    case -2147483648: char f1;
+    case -1: short f2;
+    case 1: long f3;
+    case 2147483647: float f4;
+  };
+
+  @final struct t55 {
+    t55a f1;
+    t55b f2;
+    t55c f3;
+  };
+
+  bitmask t56_bm32pos {
+    @position(1) BM32POS_1,
+    BM32POS_2,
+    @position(3) BM32POS_3,
+    BM32POS_4,
+    BM32POS_5,
+    BM32POS_6,
+    BM32POS_7,
+    BM32POS_8,
+    BM32POS_9,
+    BM32POS_10
+  };
+
+  typedef t56_bm32pos t56_bm32pos_arr[3];
+  typedef string<3> t56_bstring;
+  typedef t56_bstring t56_bstring_arr[2];
+
+  struct t56 {
+    @key sequence<t56_bm32pos_arr> f1;
+    @optional double f2;
+    string<22> f3;
+    sequence<@try_construct(TRIM) t56_bstring_arr, 1> f4;
+  };
+
+  @bit_bound(12) bitmask t57_bm16 {
+    T57_BM16_1,
+    T57_BM16_2
+  };
+
+  typedef string<5> t57_bstring;
+
+  union t57 switch (short) {
+    case 1: @external sequence<long> u1;
+    case 2: @external sequence<long, 3> u2;
+    case 3: @external sequence<t57_bstring, 2> u3;
+    case 4: @try_construct(TRIM) @external t57_bstring u4;
+    case 5: @external t57_bm16 u5;
+  };
+
+  @mutable
+  struct t58 {
+    @id(1) @must_understand sequence<sequence<long> > f1;
+    @id(2) @must_understand sequence<long> f2[2];
+  };
+
+  @bit_bound(16)
+  enum en59 {
+    EN59_0,
+    @value(-32000) EN59_NEG32000,
+    EN59_NEG31999
+  };
+
+  @mutable
+  struct t59 {
+    @id(1) long before;
+    @id(2) en59 scalar;
+    @id(3) long between;
+    @id(4) en59 arr[2];
+    @id(5) sequence<en59, 2> seq;
+    @id(6) long after;
+  };
+
+  @nested @mutable
+  struct t60_base {
+    @id(1) long base_member;
+  };
+
+  @mutable
+  struct t60 : t60_base {
+    @id(2) en59 scalar;
+    @id(3) long after;
+  };
+
+  /* enum value metadata for a nested sequence element */
+  enum en61 {
+    @value(1) EN61_1,
+    @default_literal
+    EN61_2,
+    EN61_3,
+    EN61_4,
+    @value(6) EN61_6,
+    EN61_7,
+    EN61_8,
+    @value(14) EN61_14,
+    EN61_15,
+    EN61_16,
+    EN61_17,
+    EN61_18,
+    EN61_19
+  };
+
+  typedef sequence<sequence<en61>, 10> t61_seq_en;
+
+  typedef sequence<sequence<long, 6> > t61_seq_long;
+
+  typedef char t61_char_arr[2];
+
+  @appendable
+  struct t61 {
+    @key
+    float f1;
+    sequence<t61_char_arr, 17> f2;
+    t61_seq_long f3[3][1];
+    string f4[1][2];
+    long f5;
+    sequence<octet, 12> f6;
+    @optional
+    t61_seq_en f7;
+  };
+
+  /* enum value metadata for a union case sequence element */
+  enum en62 {
+    EN62_1,
+    @default_literal
+    EN62_2,
+    EN62_3,
+    @value(6) EN62_6,
+    EN62_7
+  };
+
+  @nested
+  union t62_union switch(long) {
+    case 1:
+      sequence<long> f1;
+    case 2:
+      string f2;
+    case 3:
+      sequence<en62> f3;
+    case 4:
+      string<16> f4;
+    default:
+      string<24> f5;
+  };
+
+  struct t62 {
+    sequence<t62_union, 8> f1;
+  };
+
+  @final
+  union t63 switch (@key long) {
+    case 1: long u1;
+    case 2: short u2;
+  };
+
+  @nested @final
+  union t64_u switch (long) {
+    case 1: long u1;
+    case 2: short u2;
+  };
+
+  @final
+  struct t64 {
+    @key t64_u u;
+  };
+
+  @nested @final
+  union t65_u switch (long) {
+    case 1: octet u1;
+  };
+
+  @nested @final
+  struct t65_s {
+    t65_u s1;
+  };
+
+  @final
+  struct t65 {
+    @key t65_s t1;
+  };
+
+  @nested @final
+  union t66_u switch (long) {
+    case 1: octet u1;
+  };
+
+  @nested @final
+  struct t66_s {
+    @key t66_u s1;
+  };
+
+  @final
+  struct t66 {
+    t66_s t1;
+  };
+
+  @nested @final
+  union t67_u switch (@key long) {
+    case 1: octet u1;
+  };
+
+  @nested @final
+  struct t67_s {
+    @key t67_u s1;
+    octet s2;
+  };
+
+  @final
+  struct t67 {
+    @key t67_s t1;
+  };
+
+  @nested @final
+  union t68_u switch (@key long) {
+    case 1: octet u1;
+  };
+
+  @nested @final
+  struct t68_s {
+    t68_u s1;
+    octet s2;
+  };
+
+  @final
+  struct t68 {
+    @key t68_s t1;
+  };
+
+  @nested @final
+  union t69_u switch (@key long) {
+    case 1: octet u1;
+  };
+
+  @nested @final
+  struct t69_s {
+    t69_u s1;
+    @key octet s2;
+  };
+
+  @final
+  struct t69 {
+    @key t69_s t1;
+  };
+
+  @nested @final
+  union t70_u switch (@key long) {
+    case 1: octet u1;
+  };
+
+  @nested @final
+  struct t70_s {
+    @key t70_u s1;
+  };
+
+  @final
+  struct t70 {
+    t70_s t1;
+  };
+
+  @mutable
+  union t71 switch (long) {
+    case 1:
+    case 2:
+      @id(7) long u1;
+    case 3:
+      @id(8) short u2;
+    default:
+      @id(9) string<5> u3;
+  };
+
+  @nested @mutable
+  union t72_u switch (short) {
+    case 1:
+      @id(7) t1 u1;
+    case 2:
+      @id(8) sequence<long> u2;
+    case 3:
+      @id(9) tda1 u3;
+  };
+
+  @final
+  struct t72 {
+    t72_u u;
+  };
+
+  @nested @mutable
+  union t73_u switch (@key long) {
+    case 1:
+      @id(7) octet u1;
+    case 2:
+      @id(8) short u2;
+  };
+
+  @final
+  struct t73 {
+    @key t73_u u;
+  };
 };

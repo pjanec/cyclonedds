@@ -737,7 +737,11 @@ static void update_participant_spdp_sample_locked (struct ddsi_participant *pp, 
     ps.present = PP_PARTICIPANT_GUID;
     ps.participant_guid = pp->e.guid;
   }
-  struct ddsi_serdata * const serdata = ddsi_serdata_from_sample (pp->e.gv->spdp_type, isalive ? SDK_DATA : SDK_KEY, &ps);
+  dds_return_t rc;
+  struct ddsi_serdata *serdata;
+  rc = ddsi_serdata_from_sample_err (&serdata, pp->e.gv->spdp_type, isalive ? SDK_DATA : SDK_KEY, &ps);
+  assert (rc == DDS_RETCODE_OK); // internally generated, so how coud it possibly go wrong?
+  (void) rc;
   ddsi_plist_fini (&ps);
   serdata->statusinfo = isalive ? 0 : (DDSI_STATUSINFO_DISPOSE | DDSI_STATUSINFO_UNREGISTER);
   serdata->timestamp = ddsrt_time_wallclock ();
@@ -779,7 +783,12 @@ dds_return_t ddsi_new_participant (ddsi_guid_t *ppguid, struct ddsi_domaingv *gv
     ppconn = NULL;
   else
   {
-    const struct ddsi_tran_qos qos = { .m_purpose = DDSI_TRAN_QOS_RECV_UC, .m_diffserv = 0, .m_interface = NULL };
+    const struct ddsi_tran_qos qos = {
+      .m_purpose = DDSI_TRAN_QOS_RECVXMIT_UC,
+      .m_diffserv = 0,
+      .m_interface = &gv->interfaces[0],
+      .m_bind_to_any = true
+    };
     if (ddsi_factory_create_conn (&ppconn, gv->m_factory, 0, &qos) != DDS_RETCODE_OK)
     {
       GVERROR ("ddsi_new_participant("PGUIDFMT", %x) failed: could not create network endpoint\n", PGUID (*ppguid), flags);

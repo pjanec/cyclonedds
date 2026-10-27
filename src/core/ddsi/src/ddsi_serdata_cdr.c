@@ -177,11 +177,9 @@ static struct ddsi_serdata_cdr *serdata_cdr_from_ser_common (const struct ddsi_s
     goto err;
 
   uint32_t actual_size;
-  if (d->pos < pad || !dds_stream_normalize (d->data, d->pos - pad, needs_bswap, DDSI_RTPS_CDR_ENC_VERSION_2, &tp->type, false, &actual_size))
+  if (d->pos < pad || (dds_stream_normalize (d->data, d->pos - pad, needs_bswap, DDSI_RTPS_CDR_ENC_VERSION_2, &tp->type, false, &actual_size) != DDS_STREAM_NORMALIZE_SUCCESS))
     goto err;
 
-  dds_istream_t is;
-  dds_istream_init (&is, actual_size, d->data, DDSI_RTPS_CDR_ENC_VERSION_2);
   return d;
 
 err:
@@ -226,7 +224,7 @@ static void ostream_from_serdata_cdr (dds_ostream_t *s, const struct ddsi_serdat
 static void ostream_add_to_serdata_cdr (dds_ostream_t *s, struct ddsi_serdata_cdr **d)
 {
   /* DDSI requires 4 byte alignment */
-  const uint32_t pad = dds_cdr_alignto4_clear_and_resize (s, &dds_cdrstream_default_allocator, s->m_xcdr_version);
+  const uint32_t pad = dds_cdr_alignto4_clear_and_resize (s, &dds_cdrstream_default_allocator);
   assert (pad <= 3);
 
   /* Reset data pointer as stream may have reallocated */

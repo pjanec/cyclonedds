@@ -40,6 +40,7 @@ set(headers
   "${source_dir}/include/dds/ddsrt/fibheap.h"
   "${source_dir}/include/dds/ddsrt/hopscotch.h"
   "${source_dir}/include/dds/ddsrt/log.h"
+  "${source_dir}/src/log_priv.h"
   "${source_dir}/include/dds/ddsrt/retcode.h"
   "${source_dir}/include/dds/ddsrt/attributes.h"
   "${source_dir}/include/dds/ddsrt/endian.h"
@@ -75,6 +76,7 @@ set(headers
   "${source_dir}/src/threads_priv.h"
   "${source_dir}/include/dds/ddsrt/cdtors.h"
   "${source_dir}/include/dds/ddsrt/random.h"
+  "${source_dir}/include/dds/ddsrt/regex.h"
   "${source_dir}/include/dds/ddsrt/align.h")
 
 set(sources
@@ -103,6 +105,7 @@ set(sources
   "${source_dir}/src/ifaddrs.c"
   "${source_dir}/src/cdtors.c"
   "${source_dir}/src/random.c"
+  "${source_dir}/src/regex.c"
   "${source_dir}/src/time.c")
 
 # Not every target offers the same set of features. For embedded targets the
@@ -128,7 +131,7 @@ if(WITH_LWIP)
     "${source_dir}/src/sockets/posix/socket.c"
     "${source_dir}/src/sockets/posix/gethostname.c")
 else()
-  if(WIN32)
+  if(WIN32 OR RTX64)
     if(POLICY CMP0075)
       # suppress warnings concerning a change in behaviour of check_include_files in
       # combination with CMAKE_REQUIRED_LIBRARIES
@@ -277,13 +280,28 @@ else()
   target_link_libraries(ddsrt INTERFACE Threads::Threads)
   target_link_libraries(ddsrt INTERFACE ${CMAKE_DL_LIBS})
 
-  set(DDSRT_HAVE_DYNLIB TRUE)
-  set(DDSRT_HAVE_FILESYSTEM TRUE)
+  if(NOT RTX64)
+    set(DDSRT_HAVE_DYNLIB TRUE)
+    set(DDSRT_HAVE_FILESYSTEM TRUE)
+  endif()
 
   list(APPEND sources
     "${source_dir}/src/heap/posix/heap.c")
 
-  if(WIN32)
+  if(RTX64)
+    list(APPEND headers
+      "${source_dir}/include/dds/ddsrt/sync/windows.h"
+      "${source_dir}/include/dds/ddsrt/threads/windows.h"
+      "${source_dir}/include/dds/ddsrt/types/windows.h")
+    list(APPEND sources
+      "${source_dir}/src/dynlib/windows/dynlib.c"
+      "${source_dir}/src/environ/rtx64/environ.c"
+      "${source_dir}/src/process/windows/process.c"
+      "${source_dir}/src/random/windows/random.c"
+      "${source_dir}/src/sync/windows/sync.c"
+      "${source_dir}/src/threads/windows/threads.c"
+      "${source_dir}/src/time/windows/time.c")
+  elseif(WIN32)
     set(DDSRT_HAVE_NETSTAT TRUE)
     set(DDSRT_HAVE_RUSAGE TRUE)
 
@@ -369,7 +387,7 @@ set(DDSRT_WITH_LWIP ${WITH_LWIP})
 set(DDSRT_WITH_FREERTOS ${WITH_FREERTOS})
 
 foreach(feature TCP_TLS SECURITY LIFESPAN DEADLINE_MISSED NETWORK_PARTITIONS
-                TYPELIB TYPE_DISCOVERY TOPIC_DISCOVERY QOS_PROVIDER)
+                TYPELIB TYPE_DISCOVERY TOPIC_DISCOVERY QOS_PROVIDER TCP FAKEUDP)
   set(DDS_HAS_${feature} ${ENABLE_${feature}})
 endforeach()
 
